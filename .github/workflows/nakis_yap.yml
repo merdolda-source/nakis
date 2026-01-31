@@ -1,27 +1,31 @@
-name: Nakis Dosyasi Olustur
-on: [push]
+name: Nakis Dosyasi Üretici
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch: # Manuel çalıştırmak için buton ekler
 
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v3
+      - name: Depoyu Çek
+        uses: actions/checkout@v4
 
-      - name: Python Kurulumu
-        uses: actions/setup-python@v4
+      - name: Python Kur
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.x'
+          python-version: '3.10'
 
-      - name: Kütüphaneleri Kur
+      - name: Kütüphaneyi Yükle
         run: pip install pyembroidery
 
-      - name: Dönüştürme Betiğini Çalıştır
-        run: |
-          # Burada basit bir python komutuyla svg'yi dst'ye çeviriyoruz
-          python -c "import pyembroidery; pyembroidery.write('tasarim.svg', 'nakis_deseni.dst')"
+      - name: DST Dosyasını Oluştur
+        run: python create_embroidery.py
 
-      - name: Dosyayı Kaydet
+      - name: DST Dosyasını İndirilebilir Yap
         uses: actions/upload-artifact@v4
         with:
-          name: nakis-cikisi
-          path: nakis_deseni.dst
+          name: nakis-tasarimi
+          path: pivaz_13x8.dst
