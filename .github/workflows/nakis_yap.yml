@@ -1,0 +1,27 @@
+name: Nakis Dosyasi Olustur
+on: [push]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Python Kurulumu
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Kütüphaneleri Kur
+        run: pip install pyembroidery
+
+      - name: Dönüştürme Betiğini Çalıştır
+        run: |
+          # Burada basit bir python komutuyla svg'yi dst'ye çeviriyoruz
+          python -c "import pyembroidery; pyembroidery.write('tasarim.svg', 'nakis_deseni.dst')"
+
+      - name: Dosyayı Kaydet
+        uses: actions/upload-artifact@v4
+        with:
+          name: nakis-cikisi
+          path: nakis_deseni.dst
