@@ -1,47 +1,46 @@
 import pyembroidery
+from PIL import Image, ImageDraw
 
-def profesyonel_nakis_olustur():
-    # Yeni bir desen nesnesi oluştur
+def nakis_uret():
     pattern = pyembroidery.EmbPattern()
-
-    # DST Ölçü Birimi: 1 birim = 0.1 mm
-    # 13x8 cm alanı için 1300x800 birimlik bir koordinat düzlemi
     
-    def cizgi_dik(x1, y1, x2, y2):
-        """İğne kırmayan, güvenli adım aralıklı dikiş ekler"""
-        # Başlangıç noktasına zıpla (İpi koparmadan veya kaldırarak git)
+    # 13x8 cm Görsel Önizleme Tuvali (1300x800 pixel)
+    img = Image.new('RGB', (1300, 800), color='white')
+    draw = ImageDraw.Draw(img)
+
+    def cizgi_ekle(x1, y1, x2, y2):
+        # Nakış Komutu (DST için)
         pattern.add_stitch_absolute(pyembroidery.JUMP, x1, y1)
-        
-        # Çizgiyi oluştur (Mesafe uzaksa araya otomatik dikiş atar)
         pattern.add_stitch_absolute(pyembroidery.STITCH, x2, y2)
+        # Önizleme Çizimi (PNG için)
+        draw.line([x1, y1, x2, y2], fill='black', width=8)
 
-    # PİVAZ Yazısı İçin Basit ve Güvenli Koordinatlar
-    # Her harfi 13x8 cm (1300x800) içine yayıyoruz
+    # PİVAZ Koordinat Tasarımı (1300x800 sınırlarında)
+    # P
+    cizgi_ekle(100, 100, 100, 700)
+    cizgi_ekle(100, 100, 300, 100)
+    cizgi_ekle(300, 100, 300, 400)
+    cizgi_ekle(300, 400, 100, 400)
     
-    # 'P' Harfi
-    cizgi_dik(100, 100, 100, 700) # Dikey çizgi
-    cizgi_dik(100, 700, 300, 700) # Üst yatay
-    cizgi_dik(300, 700, 300, 400) # Yan dikey
-    cizgi_dik(300, 400, 100, 400) # Orta yatay
+    # I
+    cizgi_ekle(450, 100, 450, 700)
+    
+    # V
+    cizgi_ekle(550, 100, 700, 700)
+    cizgi_ekle(700, 700, 850, 100)
+    
+    # A
+    cizgi_ekle(950, 700, 1100, 100)
+    cizgi_ekle(1100, 100, 1250, 700)
+    cizgi_ekle(1025, 400, 1175, 400)
 
-    # 'I' Harfi
-    cizgi_dik(450, 100, 450, 700)
-
-    # 'V' Harfi
-    cizgi_dik(600, 700, 750, 100)
-    cizgi_dik(750, 100, 900, 700)
-
-    # 'A' Harfi
-    cizgi_dik(1000, 100, 1100, 700)
-    cizgi_dik(1100, 700, 1200, 100)
-    cizgi_dik(1050, 350, 1150, 350) # Orta çizgi
-
-    # Emniyet: İşlem bittiğinde iğneyi durdur
+    # 1. Nakış Dosyasını Kaydet
     pattern.add_command(pyembroidery.END)
-
-    # Yazdırma işlemi
-    pyembroidery.write(pattern, "pivaz_full_v1.dst")
-    print("DST dosyası başarıyla üretildi: pivaz_full_v1.dst")
+    pyembroidery.write(pattern, "pivaz_13x8.dst")
+    
+    # 2. Önizleme Resmini Kaydet
+    img.save("onizleme.png")
+    print("İşlem Başarılı: DST ve PNG üretildi.")
 
 if __name__ == "__main__":
-    profesyonel_nakis_olustur()
+    nakis_uret()
