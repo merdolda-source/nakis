@@ -1,31 +1,30 @@
-name: Nakis Dosyasi Üretici
+name: Full Nakis Üretim Hattı
 
 on:
   push:
     branches: [ main ]
-  workflow_dispatch: # Manuel çalıştırmak için buton ekler
+  workflow_dispatch:
 
 jobs:
-  build:
+  generate:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Depoyu Çek
+      - name: Kodları Çek
         uses: actions/checkout@v4
 
-      - name: Python Kur
+      - name: Python Hazırla
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      - name: Kütüphaneyi Yükle
+      - name: Gerekli Araçları Kur
         run: pip install pyembroidery
 
-      - name: DST Dosyasını Oluştur
-        run: python create_embroidery.py
+      - name: Hatasız DST Oluştur
+        run: python create_pivaz.py
 
-      - name: DST Dosyasını İndirilebilir Yap
+      - name: Makinaya Hazır Dosyayı Yayınla
         uses: actions/upload-artifact@v4
         with:
-          name: nakis-tasarimi
-          path: pivaz_13x8.dst
+          name: PIVAZ-NAKIS-DOSYASI
+          path: pivaz_full_v1.dst
