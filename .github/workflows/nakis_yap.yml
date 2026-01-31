@@ -1,4 +1,4 @@
-name: Full Nakis Üretim Hattı
+name: Nakis ve Onizleme Fabrikasi
 
 on:
   push:
@@ -6,25 +6,27 @@ on:
   workflow_dispatch:
 
 jobs:
-  generate:
+  build:
     runs-on: ubuntu-latest
     steps:
-      - name: Kodları Çek
+      - name: Depoyu Kopyala
         uses: actions/checkout@v4
 
-      - name: Python Hazırla
+      - name: Python 3.10 Kur
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      - name: Gerekli Araçları Kur
-        run: pip install pyembroidery
+      - name: Kütüphaneleri Yukle
+        run: pip install pyembroidery pillow
 
-      - name: Hatasız DST Oluştur
+      - name: Uretimi Baslat
         run: python create_pivaz.py
 
-      - name: Makinaya Hazır Dosyayı Yayınla
+      - name: Dosyalari Paketli Olarak Sun
         uses: actions/upload-artifact@v4
         with:
-          name: PIVAZ-NAKIS-DOSYASI
-          path: pivaz_full_v1.dst
+          name: PIVAZ_CIKTILARI
+          path: |
+            pivaz_13x8.dst
+            onizleme.png
