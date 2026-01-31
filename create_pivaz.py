@@ -1,42 +1,47 @@
 import pyembroidery
 
-def profesyonel_nakis_olustur(metin="PIVAZ"):
+def profesyonel_nakis_olustur():
+    # Yeni bir desen nesnesi oluştur
     pattern = pyembroidery.EmbPattern()
-    
-    # 13x8 cm ayarları (1 birim = 0.1 mm)
-    # Merkeze hizalamak için ofsetler
-    x, y = 0, 0
-    genislik = 1300 
-    yukseklik = 800
 
-    # 1. TEMİZLİK: Başlangıçta iğneyi merkeze konumlandır
-    pattern.add_stitch_absolute(pyembroidery.JUMP, 0, 0)
-
-    # 2. FRAME (Opsiyonel Çerçeve): İğne kırmayan emniyet dikişi
-    # Dikiş boyu 3mm (30 birim) üzerine çıkarsa otomatik böler
-    pattern.add_command(pyembroidery.SET_STITCH_BLOCK_TERMINATOR)
+    # DST Ölçü Birimi: 1 birim = 0.1 mm
+    # 13x8 cm alanı için 1300x800 birimlik bir koordinat düzlemi
     
-    # BASİT HARF ÇİZİM MANTIĞI (PİVAZ için koordinat bazlı)
-    # Not: Profesyonel üretimde harfler 'Satin Stitch' (Sarma) olmalıdır.
-    # Burada makinenin iğnesini korumak için kısa adımlı dikişler kullanıyoruz.
-    
-    def harf_p(start_x, start_y):
-        pattern.add_stitch_absolute(pyembroidery.STITCH, start_x, start_y)
-        pattern.add_stitch_absolute(pyembroidery.STITCH, start_x, start_y + 400)
-        pattern.add_stitch_absolute(pyembroidery.STITCH, start_x + 150, start_y + 400)
-        pattern.add_stitch_absolute(pyembroidery.STITCH, start_x + 150, start_y + 200)
-        pattern.add_stitch_absolute(pyembroidery.STITCH, start_x, start_y + 200)
+    def cizgi_dik(x1, y1, x2, y2):
+        """İğne kırmayan, güvenli adım aralıklı dikiş ekler"""
+        # Başlangıç noktasına zıpla (İpi koparmadan veya kaldırarak git)
+        pattern.add_stitch_absolute(pyembroidery.JUMP, x1, y1)
+        
+        # Çizgiyi oluştur (Mesafe uzaksa araya otomatik dikiş atar)
+        pattern.add_stitch_absolute(pyembroidery.STITCH, x2, y2)
 
-    # Harfleri yerleştir (Örnek başlangıç)
-    harf_p(100, 200) 
+    # PİVAZ Yazısı İçin Basit ve Güvenli Koordinatlar
+    # Her harfi 13x8 cm (1300x800) içine yayıyoruz
     
-    # 3. İĞNE KORUMA: Maksimum dikiş boyu kontrolü
-    # Çok uzun atlamalarda araya JUMP (ip kesme/atlama) komutu ekler
-    pattern.get_normalized_pattern() 
+    # 'P' Harfi
+    cizgi_dik(100, 100, 100, 700) # Dikey çizgi
+    cizgi_dik(100, 700, 300, 700) # Üst yatay
+    cizgi_dik(300, 700, 300, 400) # Yan dikey
+    cizgi_dik(300, 400, 100, 400) # Orta yatay
 
-    # 4. DOSYAYI YAZDIR (DST formatı makine komutlarını destekler)
+    # 'I' Harfi
+    cizgi_dik(450, 100, 450, 700)
+
+    # 'V' Harfi
+    cizgi_dik(600, 700, 750, 100)
+    cizgi_dik(750, 100, 900, 700)
+
+    # 'A' Harfi
+    cizgi_dik(1000, 100, 1100, 700)
+    cizgi_dik(1100, 700, 1200, 100)
+    cizgi_dik(1050, 350, 1150, 350) # Orta çizgi
+
+    # Emniyet: İşlem bittiğinde iğneyi durdur
+    pattern.add_command(pyembroidery.END)
+
+    # Yazdırma işlemi
     pyembroidery.write(pattern, "pivaz_full_v1.dst")
-    print("İğne korumalı DST dosyası oluşturuldu.")
+    print("DST dosyası başarıyla üretildi: pivaz_full_v1.dst")
 
 if __name__ == "__main__":
     profesyonel_nakis_olustur()
