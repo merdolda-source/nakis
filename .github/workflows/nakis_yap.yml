@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       metin:
-        description: 'Yazılacak Metin (örn: ISMAIL)'
+        description: 'Yazılacak Metin'
         required: true
         default: 'ISMAIL'
       genislik:
@@ -20,17 +20,24 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Kodlari Cek
+        uses: actions/checkout@v4
+
+      - name: Python Hazirla
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-      - run: pip install pyembroidery
-      - name: Nakis Uret
+
+      - name: Kütüphane Kur
+        run: pip install pyembroidery
+
+      - name: Nakis Uret (Dinamik)
         run: python create_pivaz.py "${{ github.event.inputs.metin }}" ${{ github.event.inputs.genislik }} ${{ github.event.inputs.yukseklik }}
-      - name: Paketi Yukle
+
+      - name: Dosyalari Yukle
         uses: actions/upload-artifact@v4
         with:
-          name: "${{ github.event.inputs.metin }}_CIKTI"
+          name: "${{ github.event.inputs.metin }}_PAKETI"
           path: |
-            ozel_tasarim.dst
-            ozel_tasarim.jef
+            pivaz_cikti.dst
+            pivaz_cikti.jef
