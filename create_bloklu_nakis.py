@@ -1,105 +1,112 @@
 import pyembroidery
 import math
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFilter
 
 # =====================
-# GENEL AYARLAR
+# AYARLAR
 # =====================
-WIDTH = 1200
-HEIGHT = 800
+PREVIEW_W = 1200
+PREVIEW_H = 800
 
-SEYREK = 10   # Büyük alan – hızlı
-SIKI   = 5    # Detay
+SEYREK = 10   # büyük alan (hızlı)
+SIKI   = 5    # detay
 KONTUR = 3
+
+IMG_PATH = "logo.png"
 
 pattern = pyembroidery.EmbPattern()
 
 # =====================
-# BLOK DOLGU FONKSİYONU
+# RESMİ HAZIRLA
 # =====================
-def blok_dolgu(x1, y1, x2, y2, step, yatay=True):
+def load_logo(path):
+    img = Image.open(path).convert("L")
+    img = img.filter(ImageFilter.MedianFilter(3))
+    img = img.point(lambda x: 0 if x < 150 else 255, "1")
+    return img
+
+# =====================
+# BLOK DOLGU
+# =====================
+def blok_dolgu(img, step, yatay=True):
+    px = img.load()
+    w, h = img.size
     yon = 1
+
     if yatay:
-        for y in range(y1, y2, step):
-            if yon == 1:
-                pattern.add_stitch_absolute(pyembroidery.JUMP, x1, y)
-                pattern.add_stitch_absolute(pyembroidery.STITCH, x2, y)
-            else:
-                pattern.add_stitch_absolute(pyembroidery.JUMP, x2, y)
-                pattern.add_stitch_absolute(pyembroidery.STITCH, x1, y)
+        for y in range(0, h, step):
+            drawing = False
+            for x in range(0, w):
+                if px[x, y] == 0:
+                    if not drawing:
+                        pattern.add_stitch_absolute(pyembroidery.JUMP, x, y)
+                        drawing = True
+                    pattern.add_stitch_absolute(pyembroidery.STITCH, x, y)
+                else:
+                    drawing = False
             yon *= -1
     else:
-        for x in range(x1, x2, step):
-            if yon == 1:
-                pattern.add_stitch_absolute(pyembroidery.JUMP, x, y1)
-                pattern.add_stitch_absolute(pyembroidery.STITCH, x, y2)
-            else:
-                pattern.add_stitch_absolute(pyembroidery.JUMP, x, y2)
-                pattern.add_stitch_absolute(pyembroidery.STITCH, x, y1)
+        for x in range(0, w, step):
+            drawing = False
+            for y in range(0, h):
+                if px[x, y] == 0:
+                    if not drawing:
+                        pattern.add_stitch_absolute(pyembroidery.JUMP, x, y)
+                        drawing = True
+                    pattern.add_stitch_absolute(pyembroidery.STITCH, x, y)
+                else:
+                    drawing = False
             yon *= -1
 
 # =====================
-# DAİRE (MERKEZ OBJE)
+# KONTUR
 # =====================
-def daire(cx, cy, r):
-    pattern.add_stitch_absolute(pyembroidery.JUMP, cx + r, cy)
-    for a in range(0, 361, 4):
-        x = cx + int(r * math.cos(math.radians(a)))
-        y = cy + int(r * math.sin(math.radians(a)))
-        pattern.add_stitch_absolute(pyembroidery.STITCH, x, y)
+def kontur(img):
+    px = img.load()
+    w, h = img.size
+
+    for y in range(1, h-1):
+        for x in range(1, w-1):
+            if px[x, y] == 0:
+                if (
+                    px[x-1,y] == 255 or px[x+1,y] == 255 or
+                    px[x,y-1] == 255 or px[x,y+1] == 255
+                ):
+                    pattern.add_stitch_absolute(pyembroidery.JUMP, x, y)
+                    pattern.add_stitch_absolute(pyembroidery.STITCH, x, y)
 
 # =====================
-# 1️⃣ ÜST BLOK
+# ANA AKIŞ
 # =====================
-blok_dolgu(-600, -300, 600, -100, SEYREK, yatay=True)
+logo = load_logo(IMG_PATH)
 
-# =====================
-# 2️⃣ ORTA BLOK
-# =====================
-blok_dolgu(-600, -100, 600, 100, SEYREK, yatay=False)
+# 1️⃣ Büyük alan – seyrek
+blok_dolgu(logo, SEYREK, yatay=True)
 
-# =====================
-# 3️⃣ ALT BLOK
-# =====================
-blok_dolgu(-600, 100, 600, 300, SEYREK, yatay=True)
+# 2️⃣ Aynı alan – sık
+blok_dolgu(logo, SIKI, yatay=False)
 
-# =====================
-# 4️⃣ MERKEZ DAİRELER
-# =====================
-daire(0, 0, 80)
-daire(0, 0, 60)
-daire(0, 0, 40)
+# 3️⃣ Kontur – en son
+kontur(logo)
 
-# =====================
-# 5️⃣ DIŞ KONTUR (EN SON)
-# =====================
-pattern.add_stitch_absolute(pyembroidery.JUMP, -620, -320)
-pattern.add_stitch_absolute(pyembroidery.STITCH, 620, -320)
-pattern.add_stitch_absolute(pyembroidery.STITCH, 620, 320)
-pattern.add_stitch_absolute(pyembroidery.STITCH, -620, 320)
-pattern.add_stitch_absolute(pyembroidery.STITCH, -620, -320)
-
-# =====================
-# KAPAT
-# =====================
 pattern.add_command(pyembroidery.END)
 pattern = pattern.get_normalized_pattern()
 
 # =====================
 # NAKIŞ DOSYALARI
 # =====================
-pyembroidery.write(pattern, "bloklu_nakis.dst")
-pyembroidery.write(pattern, "bloklu_nakis.jef")
+pyembroidery.write(pattern, "logo_nakis.dst")
+pyembroidery.write(pattern, "logo_nakis.jef")
 
 # =====================
 # JPG ÖNİZLEME
 # =====================
-img = Image.new("RGB", (WIDTH, HEIGHT), "white")
+img = Image.new("RGB", (PREVIEW_W, PREVIEW_H), "white")
 draw = ImageDraw.Draw(img)
 
-scale = 0.4
-ox = WIDTH // 2
-oy = HEIGHT // 2
+scale = 0.5
+ox = PREVIEW_W // 2
+oy = PREVIEW_H // 2
 
 last = None
 for s in pattern.stitches:
@@ -109,23 +116,6 @@ for s in pattern.stitches:
         draw.line([last, (x, y)], fill="black", width=1)
     last = (x, y)
 
-img.save("bloklu_nakis.jpg", quality=95)
+img.save("logo_onizleme.jpg", quality=95)
 
-print("✅ DST + JEF + JPG önizleme başarıyla üretildi")
-draw = ImageDraw.Draw(img)
-
-scale = 0.4
-ox = WIDTH // 2
-oy = HEIGHT // 2
-
-last = None
-for s in pattern.stitches:
-    x = int(s[0] * scale) + ox
-    y = int(s[1] * scale) + oy
-    if last:
-        draw.line([last, (x, y)], fill="black", width=1)
-    last = (x, y)
-
-img.save("bloklu_nakis.jpg", quality=95)
-
-print("✅ DST + JEF + JPG önizleme üretildi")
+print("✅ logo.png repodan alındı, nakış + JPG önizleme üretildi")
