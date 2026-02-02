@@ -1,51 +1,56 @@
 import pyembroidery
 
-def mb4_profesyonel_uret():
+def mb4_final_fix():
     pattern = pyembroidery.EmbPattern()
     
-    # MB-4 için 12x7 cm güvenli alan (Merkezlenmiş)
-    # 0,0 noktası kasnağın tam ortasıdır.
+    # MB-4 için koordinatları mm'den nakış birimine çeviriyoruz (10x)
+    # Merkeze (0,0) konumlandırıyoruz.
     
-    def harf_ciz(koordinatlar):
-        # İlk noktaya iğne havada git (JUMP)
-        start_x, start_y = koordinatlar[0]
-        pattern.add_stitch_absolute(pyembroidery.JUMP, start_x, start_y)
+    def cizgi_olustur(x1, y1, x2, y2):
+        # Başlangıca JUMP (atlama) yap
+        pattern.add_stitch_absolute(pyembroidery.JUMP, x1, y1)
         
-        # Diğer noktalar arasını dikişle doldur (STITCH)
-        for i in range(1, len(koordinatlar)):
-            x, y = koordinatlar[i]
-            pattern.add_stitch_absolute(pyembroidery.STITCH, x, y)
+        # Çizgi boyunca her 2mm'de bir iğne batır (Böylece makine 'tek vuruş' yapamaz)
+        steps = max(abs(x2 - x1), abs(y2 - y1)) // 20  # Her 2mm (20 birim)
+        if steps < 1: steps = 1
         
-        # Harf bitince ipi atlat
-        pattern.add_command(pyembroidery.JUMP)
+        for i in range(1, int(steps) + 1):
+            curr_x = x1 + (x2 - x1) * i / steps
+            curr_y = y1 + (y2 - y1) * i / steps
+            pattern.add_stitch_absolute(pyembroidery.STITCH, int(curr_x), int(curr_y))
 
-    # PİVAZ Koordinatları (Merkez 0,0 olacak şekilde)
-    # Değerler 0.1mm birimindedir (400 = 4cm)
-    
+    # PİVAZ Tasarımı (120x70mm alanı içinde)
     # P
-    harf_ciz([(-500, 300), (-500, -300), (-300, -300), (-300, 0), (-500, 0)])
-    # I
-    harf_ciz([(-200, 300), (-200, -300)])
-    # V
-    harf_ciz([(-100, -300), (0, 300), (100, -300)])
-    # A
-    harf_ciz([(150, 300), (300, -300), (450, 300)])
-    harf_ciz([(220, 0), (380, 0)])
-    # Z
-    harf_ciz([(500, -300), (700, -300), (500, 300), (700, 300)])
-
-    # --- KRİTİK AYAR: İğne kırmayan dikiş bölücü ---
-    # Bu komut, uzun çizgileri makinenin dikebileceği 3mm'lik parçalara böler.
-    # Ekranda görüntünün gelmesini sağlayan asıl kısım burasıdır.
-    pattern = pattern.get_normalized_pattern()
-    pattern.max_stitch_length = 30 # 3.0 mm maksimum dikiş boyu
+    cizgi_olustur(-500, -300, -500, 300)
+    cizgi_olustur(-500, -300, -300, -300)
+    cizgi_olustur(-300, -300, -300, 0)
+    cizgi_olustur(-300, 0, -500, 0)
     
-    pattern.add_command(pyembroidery.END)
+    # I
+    cizgi_olustur(-150, -300, -150, 300)
+    
+    # V
+    cizgi_olustur(-50, -300, 100, 300)
+    cizgi_olustur(100, 300, 250, -300)
+    
+    # A
+    cizgi_olustur(350, 300, 500, -300)
+    cizgi_olustur(500, -300, 650, 300)
+    cizgi_olustur(425, 0, 575, 0)
+    
+    # Z
+    cizgi_olustur(750, -300, 950, -300)
+    cizgi_olustur(950, -300, 750, 300)
+    cizgi_olustur(750, 300, 950, 300)
 
-    # Dosyaları Yazdır
-    pyembroidery.write(pattern, "pivaz_mb4_final.dst")
-    pyembroidery.write(pattern, "pivaz_mb4_final.jef")
-    print("MB-4 için yüksek çözünürlüklü dosya üretildi.")
+    # ÖNEMLİ: Janome MB-4'ün ekranında görünmesi için dikişleri normalize et
+    pattern = pattern.get_normalized_pattern()
+    
+    # Dosyaları yaz
+    # JEF formatı Janome için daha fazla görsel veri taşır.
+    pyembroidery.write(pattern, "pivaz_mb4_v3.dst")
+    pyembroidery.write(pattern, "pivaz_mb4_v3.jef")
+    print("İşlem tamam! Dikiş sayısı artırıldı.")
 
 if __name__ == "__main__":
-    mb4_profesyonel_uret()
+    mb4_final_fix()
