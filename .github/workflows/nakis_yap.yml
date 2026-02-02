@@ -1,4 +1,4 @@
-name: Janome MB4 Logo Nakis
+name: Janome MB4 Bloklu Nakis (Preview)
 
 on:
   push:
@@ -21,16 +21,17 @@ jobs:
       - name: 📦 Kutuphaneleri Kur
         run: |
           python -m pip install --upgrade pip
-          pip install pyembroidery pillow
+          pip install pyembroidery
 
-      - name: 🧵 Resimden Nakis Uret
+      - name: 🧵 Bloklu Nakis Uret
         run: |
-          python create_pivaz.py
+          python create_bloklu_nakis.py
 
-      - name: 📤 Nakis Dosyalarini Yukle
+      - name: 📤 Nakis + Onizleme Yukle
         uses: actions/upload-artifact@v4
         with:
-          name: JANOME_MB4_LOGO_FINAL
+          name: JANOME_MB4_BLOKLU_FINAL
           path: |
-            tatli_duragi.dst
-            tatli_duragi.jef
+            bloklu_nakis.dst
+            bloklu_nakis.jef
+            bloklu_nakis.svg
