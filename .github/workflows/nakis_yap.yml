@@ -1,4 +1,4 @@
-name: Nakis ve Onizleme Fabrikasi
+name: Janome MB4 Nakis Fabrikasi
 
 on:
   push:
@@ -6,10 +6,10 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
+  generate_embroidery:
     runs-on: ubuntu-latest
     steps:
-      - name: Depoyu Kopyala
+      - name: Depoyu Cek
         uses: actions/checkout@v4
 
       - name: Python 3.10 Kur
@@ -17,16 +17,17 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Kütüphaneleri Yukle
+      - name: Gerekli Aracları Kur (Pillow ve Pyembroidery)
         run: pip install pyembroidery pillow
 
-      - name: Uretimi Baslat
+      - name: Nakis Dosyalarini Uret
         run: python create_pivaz.py
 
-      - name: Dosyalari Paketli Olarak Sun
+      - name: Tum Paketleri Indirilebilir Yap
         uses: actions/upload-artifact@v4
         with:
-          name: PIVAZ_CIKTILARI
+          name: Janome_MB4_Paketi
           path: |
-            pivaz_13x8.dst
+            pivaz_final.dst
+            pivaz_final.jef
             onizleme.png
