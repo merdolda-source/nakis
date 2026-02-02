@@ -1,4 +1,4 @@
-name: Janome MB4 Uretim
+name: Janome MB4 Logo Nakis
 
 on:
   push:
@@ -13,24 +13,24 @@ jobs:
       - name: 📥 Kodlari Cek
         uses: actions/checkout@v4
 
-      - name: 🐍 Python Hazirla
+      - name: 🐍 Python Kur
         uses: actions/setup-python@v5
         with:
           python-version: "3.10"
 
-      - name: 📦 Kutuphane Kur
+      - name: 📦 Kutuphaneleri Kur
         run: |
           python -m pip install --upgrade pip
-          pip install pyembroidery
+          pip install pyembroidery pillow
 
-      - name: 🧵 Nakis Dosyalarini Uret
+      - name: 🧵 Resimden Nakis Uret
         run: |
           python create_pivaz.py
 
-      - name: 📤 Ciktilari Yukle
+      - name: 📤 Nakis Dosyalarini Yukle
         uses: actions/upload-artifact@v4
         with:
-          name: JANOME_MB4_FINAL
+          name: JANOME_MB4_LOGO_FINAL
           path: |
-            pivaz_cikti.dst
-            pivaz_cikti.jef
+            tatli_duragi.dst
+            tatli_duragi.jef
