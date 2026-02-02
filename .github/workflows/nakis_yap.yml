@@ -1,9 +1,6 @@
-name: Janome MB4 Profesyonel Serisi
+name: Janome MB4 Uretim
 
-on:
-  push:
-    branches: [ main ]
-  workflow_dispatch:
+on: [push, workflow_dispatch]
 
 jobs:
   build:
@@ -17,16 +14,16 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Pyembroidery Kur
+      - name: Kütüphane Kur
         run: pip install pyembroidery
 
-      - name: Hatasiz Nakis Uret
+      - name: Dosyalari Uret
         run: python create_pivaz.py
 
       - name: Dosyalari Yukle
         uses: actions/upload-artifact@v4
         with:
-          name: JANOME_MB4_FINAL_PAKET
+          name: JANOME_MB4_FINAL
           path: |
-            pivaz_mb4_final.dst
-            pivaz_mb4_final.jef
+            pivaz_cikti.dst
+            pivaz_cikti.jef
