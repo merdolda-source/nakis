@@ -5,21 +5,17 @@ from PIL import Image, ImageDraw
 # =====================
 # GENEL AYARLAR
 # =====================
-MM = 10
 WIDTH = 1200
 HEIGHT = 800
 
-SEYREK = 10   # büyük alan (hızlı)
-SIKI   = 5    # detay
+SEYREK = 10   # Büyük alan – hızlı
+SIKI   = 5    # Detay
 KONTUR = 3
 
-# =====================
-# PATTERN
-# =====================
 pattern = pyembroidery.EmbPattern()
 
 # =====================
-# BLOK DOLGU
+# BLOK DOLGU FONKSİYONU
 # =====================
 def blok_dolgu(x1, y1, x2, y2, step, yatay=True):
     yon = 1
@@ -68,7 +64,7 @@ blok_dolgu(-600, -100, 600, 100, SEYREK, yatay=False)
 blok_dolgu(-600, 100, 600, 300, SEYREK, yatay=True)
 
 # =====================
-# 4️⃣ MERKEZ OBJE
+# 4️⃣ MERKEZ DAİRELER
 # =====================
 daire(0, 0, 80)
 daire(0, 0, 60)
@@ -90,15 +86,32 @@ pattern.add_command(pyembroidery.END)
 pattern = pattern.get_normalized_pattern()
 
 # =====================
-# DOSYA ÇIKTILARI
+# NAKIŞ DOSYALARI
 # =====================
 pyembroidery.write(pattern, "bloklu_nakis.dst")
 pyembroidery.write(pattern, "bloklu_nakis.jef")
 
 # =====================
-# JPG ÖNİZLEME (MAKİNE GİBİ)
+# JPG ÖNİZLEME
 # =====================
 img = Image.new("RGB", (WIDTH, HEIGHT), "white")
+draw = ImageDraw.Draw(img)
+
+scale = 0.4
+ox = WIDTH // 2
+oy = HEIGHT // 2
+
+last = None
+for s in pattern.stitches:
+    x = int(s[0] * scale) + ox
+    y = int(s[1] * scale) + oy
+    if last:
+        draw.line([last, (x, y)], fill="black", width=1)
+    last = (x, y)
+
+img.save("bloklu_nakis.jpg", quality=95)
+
+print("✅ DST + JEF + JPG önizleme başarıyla üretildi")
 draw = ImageDraw.Draw(img)
 
 scale = 0.4
