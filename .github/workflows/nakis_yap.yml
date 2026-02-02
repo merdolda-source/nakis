@@ -1,29 +1,35 @@
-name: Janome MB4 Uretim
+name: Nakis Tasarim Paneli
 
-on: [push, workflow_dispatch]
+on:
+  workflow_dispatch:
+    inputs:
+      metin:
+        description: 'Yazılacak Metin'
+        required: true
+        default: 'PIVAZ'
+      genislik:
+        description: 'Genişlik (mm)'
+        required: true
+        default: '120'
+      yukseklik:
+        description: 'Yükseklik (mm)'
+        required: true
+        default: '70'
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Kodlari Cek
-        uses: actions/checkout@v4
-
-      - name: Python Hazirla
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-
-      - name: Kütüphane Kur
-        run: pip install pyembroidery
-
-      - name: Dosyalari Uret
-        run: python create_pivaz.py
-
-      - name: Dosyalari Yukle
-        uses: actions/upload-artifact@v4
+      - run: pip install pyembroidery
+      - name: Nakis Uret
+        run: python create_pivaz.py "${{ github.event.inputs.metin }}" ${{ github.event.inputs.genislik }} ${{ github.event.inputs.yukseklik }}
+      - uses: actions/upload-artifact@v4
         with:
-          name: JANOME_MB4_FINAL
+          name: ${{ github.event.inputs.metin }}_NAKIS
           path: |
-            pivaz_cikti.dst
-            pivaz_cikti.jef
+            pivaz_ozel.dst
+            pivaz_ozel.jef
