@@ -1,4 +1,4 @@
-name: Janome MB4 Nakis Fabrikasi
+name: Janome MB4 Tam Uretim
 
 on:
   push:
@@ -6,28 +6,28 @@ on:
   workflow_dispatch:
 
 jobs:
-  generate_embroidery:
+  build:
     runs-on: ubuntu-latest
     steps:
-      - name: Depoyu Cek
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Python 3.10 Kur
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      - name: Gerekli Aracları Kur (Pillow ve Pyembroidery)
+      - name: Install dependencies
         run: pip install pyembroidery pillow
 
-      - name: Nakis Dosyalarini Uret
+      - name: Generate files
         run: python create_pivaz.py
 
-      - name: Tum Paketleri Indirilebilir Yap
+      - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: Janome_MB4_Paketi
+          name: PIVAZ_MB4_DOSYALARI
           path: |
-            pivaz_final.dst
-            pivaz_final.jef
+            pivaz_mb4.dst
+            pivaz_mb4.jef
             onizleme.png
