@@ -1,12 +1,12 @@
-name: Nakis Tasarim Paneli
+name: MB4 Nakis Kontrol Paneli
 
 on:
   workflow_dispatch:
     inputs:
       metin:
-        description: 'Yazılacak Metin'
+        description: 'Yazılacak Metin (örn: ISMAIL)'
         required: true
-        default: 'PIVAZ'
+        default: 'ISMAIL'
       genislik:
         description: 'Genişlik (mm)'
         required: true
@@ -14,7 +14,7 @@ on:
       yukseklik:
         description: 'Yükseklik (mm)'
         required: true
-        default: '70'
+        default: '65'
 
 jobs:
   build:
@@ -27,9 +27,10 @@ jobs:
       - run: pip install pyembroidery
       - name: Nakis Uret
         run: python create_pivaz.py "${{ github.event.inputs.metin }}" ${{ github.event.inputs.genislik }} ${{ github.event.inputs.yukseklik }}
-      - uses: actions/upload-artifact@v4
+      - name: Paketi Yukle
+        uses: actions/upload-artifact@v4
         with:
-          name: ${{ github.event.inputs.metin }}_NAKIS
+          name: "${{ github.event.inputs.metin }}_CIKTI"
           path: |
-            pivaz_ozel.dst
-            pivaz_ozel.jef
+            ozel_tasarim.dst
+            ozel_tasarim.jef
