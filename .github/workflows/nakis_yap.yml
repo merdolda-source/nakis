@@ -1,4 +1,4 @@
-name: Janome MB4 Bloklu Nakis (JPG Preview)
+name: Janome MB4 Logo Nakis (Repo logo.png)
 
 on:
   push:
@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: 📥 Kodlari Cek
+      - name: 📥 Repo Kodlarini Cek
         uses: actions/checkout@v4
 
       - name: 🐍 Python Kur
@@ -23,15 +23,15 @@ jobs:
           python -m pip install --upgrade pip
           pip install pyembroidery pillow
 
-      - name: 🧵 Bloklu Nakis Uret
+      - name: 🧵 logo.png ile Nakis Uret
         run: |
           python create_bloklu_nakis.py
 
       - name: 📤 Nakis + JPG Onizleme Yukle
         uses: actions/upload-artifact@v4
         with:
-          name: JANOME_MB4_BLOKLU_FINAL
+          name: JANOME_MB4_LOGO_FINAL
           path: |
-            bloklu_nakis.dst
-            bloklu_nakis.jef
-            bloklu_nakis.jpg
+            logo_nakis.dst
+            logo_nakis.jef
+            logo_onizleme.jpg
