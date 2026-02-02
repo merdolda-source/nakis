@@ -1,4 +1,4 @@
-name: Janome MB4 Tam Uretim
+name: Janome MB4 Profesyonel Serisi
 
 on:
   push:
@@ -9,25 +9,24 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
+      - name: Kodlari Cek
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Python Hazirla
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      - name: Install dependencies
-        run: pip install pyembroidery pillow
+      - name: Pyembroidery Kur
+        run: pip install pyembroidery
 
-      - name: Generate files
+      - name: Hatasiz Nakis Uret
         run: python create_pivaz.py
 
-      - name: Upload Artifacts
+      - name: Dosyalari Yukle
         uses: actions/upload-artifact@v4
         with:
-          name: PIVAZ_MB4_DOSYALARI
+          name: JANOME_MB4_FINAL_PAKET
           path: |
-            pivaz_mb4.dst
-            pivaz_mb4.jef
-            onizleme.png
+            pivaz_mb4_final.dst
+            pivaz_mb4_final.jef
