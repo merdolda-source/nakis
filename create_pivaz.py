@@ -1,42 +1,40 @@
 import pyembroidery
 import sys
 
-def uret_satin_nakis(metin, genislik_mm, yukseklik_mm):
+def dolgu_harf_ureti(metin, genislik_mm, yukseklik_mm):
     pattern = pyembroidery.EmbPattern()
     
-    # MB-4 Birimi: 1mm = 10 birim
+    # MB-4 Birimi: 1mm = 10 birim. Tasarımı merkeze (0,0) odaklıyoruz.
     w = genislik_mm * 10
     h = yukseklik_mm * 10
-    
-    # Harf başı genişlik (Basit bölme)
-    harf_genislik = w / len(metin)
-    
-    def sarma_dikiş_ciz(x, y, harf):
-        # Bu fonksiyon harfleri sembolik sarma dikişe çevirir
-        # Her harf için zikzak dikiş mantığı (Satin Stitch)
-        offset_x = x - (w / 2)
-        offset_y = y - (h / 2)
-        
-        # Harf iskeletine göre sık zikzaklar atar (İğne kırmaz, dolgun görünür)
-        for i in range(0, int(h), 5): # 0.5mm aralıkla zikzak
-            # Sol taraf
-            pattern.add_stitch_absolute(pyembroidery.STITCH, offset_x, offset_y + i)
-            # Sağ taraf (3mm genişlikte sarma)
-            pattern.add_stitch_absolute(pyembroidery.STITCH, offset_x + 30, offset_y + i)
-        
+    harf_sayisi = len(metin)
+    harf_genisligi = w / harf_sayisi
+
+    def sarma_blok_ekle(baslangic_x, y, harf_w, harf_h):
+        # Harfin iskeletini doldurmak için zikzak (Satin) simülasyonu
+        # Her 0.4mm'de bir iğne batırarak dolgu oluşturur
+        for i in range(0, int(harf_h), 4):
+            # Sol vuruş
+            pattern.add_stitch_absolute(pyembroidery.STITCH, int(baslangic_x), int(y + i))
+            # Sağ vuruş (Harf kalınlığı yaklaşık 3mm)
+            pattern.add_stitch_absolute(pyembroidery.STITCH, int(baslangic_x + 30), int(y + i))
         pattern.add_command(pyembroidery.JUMP)
 
-    # Metni işle
-    for i, harf in enumerate(metin):
-        sarma_dikiş_ciz(i * harf_genislik, 0, harf)
+    # Her harf için bir dolgu bloğu oluştur
+    for i in range(harf_sayisi):
+        x_merkez = (i * harf_genisligi) - (w / 2)
+        y_merkez = -(h / 2)
+        sarma_blok_ekle(x_merkez, y_merkez, harf_genisligi, h)
 
     pattern = pattern.get_normalized_pattern()
-    pyembroidery.write(pattern, "pivaz_ozel.dst")
-    pyembroidery.write(pattern, "pivaz_ozel.jef")
+    # Hem JEF hem DST üret
+    pyembroidery.write(pattern, "ozel_tasarim.dst")
+    pyembroidery.write(pattern, "ozel_tasarim.jef")
 
 if __name__ == "__main__":
-    # GitHub'dan gelen argümanları oku
-    m = sys.argv[1] if len(sys.argv) > 1 else "PIVAZ"
-    g = int(sys.argv[2]) if len(sys.argv) > 2 else 120
-    y = int(sys.argv[3]) if len(sys.argv) > 3 else 70
-    uret_satin_nakis(m, g, y)
+    # GitHub'dan gelen: Metin, Genişlik, Yükseklik
+    args = sys.argv
+    metin = args[1] if len(args) > 1 else "ISMAIL"
+    g = int(args[2]) if len(args) > 2 else 120
+    y = int(args[3]) if len(args) > 3 else 65
+    dolgu_harf_ureti(metin, g, y)
