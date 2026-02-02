@@ -1,46 +1,49 @@
 import pyembroidery
 from PIL import Image, ImageDraw
 
-def nakis_uret():
+def nakis_uret_full_paket():
     pattern = pyembroidery.EmbPattern()
     
-    # 13x8 cm Görsel Önizleme Tuvali (1300x800 pixel)
+    # MB-4 için 13x8 cm (1300x800 birim)
+    # Görsel önizleme için tuval
     img = Image.new('RGB', (1300, 800), color='white')
     draw = ImageDraw.Draw(img)
 
     def cizgi_ekle(x1, y1, x2, y2):
-        # Nakış Komutu (DST için)
+        # Nakış Komutu: JUMP (Atla) ve STITCH (Dik)
+        # Koordinatları merkeze göre ofsetliyoruz (Janome Standardı)
         pattern.add_stitch_absolute(pyembroidery.JUMP, x1, y1)
         pattern.add_stitch_absolute(pyembroidery.STITCH, x2, y2)
-        # Önizleme Çizimi (PNG için)
-        draw.line([x1, y1, x2, y2], fill='black', width=8)
+        # Önizleme resmi çizimi
+        draw.line([x1, y1, x2, y2], fill='black', width=6)
 
-    # PİVAZ Koordinat Tasarımı (1300x800 sınırlarında)
+    # PİVAZ Tasarımı (Merkezlenmiş Koordinatlar)
     # P
-    cizgi_ekle(100, 100, 100, 700)
-    cizgi_ekle(100, 100, 300, 100)
-    cizgi_ekle(300, 100, 300, 400)
-    cizgi_ekle(300, 400, 100, 400)
-    
+    cizgi_ekle(100, 150, 100, 650)
+    cizgi_ekle(100, 150, 250, 150)
+    cizgi_ekle(250, 150, 250, 350)
+    cizgi_ekle(250, 350, 100, 350)
     # I
-    cizgi_ekle(450, 100, 450, 700)
-    
+    cizgi_ekle(350, 150, 350, 650)
     # V
-    cizgi_ekle(550, 100, 700, 700)
-    cizgi_ekle(700, 700, 850, 100)
-    
+    cizgi_ekle(450, 150, 550, 650)
+    cizgi_ekle(550, 650, 650, 150)
     # A
-    cizgi_ekle(950, 700, 1100, 100)
-    cizgi_ekle(1100, 100, 1250, 700)
-    cizgi_ekle(1025, 400, 1175, 400)
+    cizgi_ekle(750, 650, 850, 150)
+    cizgi_ekle(850, 150, 950, 650)
+    cizgi_ekle(800, 450, 900, 450)
+    # Z
+    cizgi_ekle(1050, 150, 1200, 150)
+    cizgi_ekle(1200, 150, 1050, 650)
+    cizgi_ekle(1050, 650, 1200, 650)
 
-    # 1. Nakış Dosyasını Kaydet
     pattern.add_command(pyembroidery.END)
-    pyembroidery.write(pattern, "pivaz_13x8.dst")
-    
-    # 2. Önizleme Resmini Kaydet
+
+    # Dosyaları Kaydet
+    pyembroidery.write(pattern, "pivaz_final.dst") # Endüstriyel / MB-4
+    pyembroidery.write(pattern, "pivaz_final.jef") # Janome Ev Tipi / MB-4
     img.save("onizleme.png")
-    print("İşlem Başarılı: DST ve PNG üretildi.")
+    print("Üretim tamam: DST, JEF ve PNG hazır.")
 
 if __name__ == "__main__":
-    nakis_uret()
+    nakis_uret_full_paket()
