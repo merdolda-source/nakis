@@ -51,20 +51,26 @@ jobs:
               except OSError:
                   font = ImageFont.load_default()
 
-              bbox = draw.textbbox((0, 0), text, font=font)
-              text_w = bbox[2] - bbox[0]
-              text_h = bbox[3] - bbox[1]
+              bbox_text = draw.textbbox((0, 0), text, font=font)
+              text_w = bbox_text[2] - bbox_text[0]
+              text_h = bbox_text[3] - bbox_text[1]
 
-              x = (img_w - text_w) // 2 - bbox[0]
-              y = (img_h - text_h) // 2 - bbox[1]
+              x = (img_w - text_w) // 2 - bbox_text[0]
+              y = (img_h - text_h) // 2 - bbox_text[1]
               draw.text((x, y), text, fill=255, font=font)
 
+              # Çizilen yazının gerçek bounding box'ı
               bbox = img.getbbox()
               if not bbox:
                   raise ValueError("Yazı boş çıktı.")
               left, top, right, bottom = bbox
-              text_w_px = right - left
-              text_h_px = bottom - top
+
+              # PIL bbox: right, bottom EXCLUSIVE -> inclusive'e çevir
+              right -= 1
+              bottom -= 1
+
+              text_w_px = right - left + 1
+              text_h_px = bottom - top + 1
 
               # 2) Piksel -> nakış ölçeği
               width_units = width_mm * UNIT
@@ -79,8 +85,9 @@ jobs:
 
               mm_per_px = scale / UNIT
 
-              row_step_px = max(1, int(round(1.0 / mm_per_px)))   # ~1mm satır arası
-              stitch_step_px = max(1, int(round(1.8 / mm_per_px)))  # ~1.8mm aralık
+              # Yaklaşık 1mm satır arası, 1.8mm dikiş arası
+              row_step_px = max(1, int(round(1.0 / mm_per_px)))
+              stitch_step_px = max(1, int(round(1.8 / mm_per_px)))
 
               # 3) Tatami dolgu
               pattern = pyembroidery.EmbPattern()
@@ -100,6 +107,7 @@ jobs:
 
               pixels = img.load()
 
+              # Yatay satırlar boyunca beyaz segmentleri doldur
               for y_px in range(top, bottom + 1, row_step_px):
                   inside_segment = False
                   seg_start = None
@@ -118,13 +126,16 @@ jobs:
                           end_px = seg_end
                           y_units = (y_px - cy_px) * scale
 
+                          # Segment başına JUMP
                           x0_units = (start_px - cx_px) * scale
                           add_stitch(pyembroidery.JUMP, x0_units, y_units)
 
+                          # Segmenti STITCH ile doldur
                           for xx in range(start_px, end_px + 1, stitch_step_px):
                               x_units = (xx - cx_px) * scale
                               add_stitch(pyembroidery.STITCH, x_units, y_units)
 
+                  # Satır sonu hâlâ segment içindeysek
                   if inside_segment:
                       seg_end = right
                       start_px = seg_start
