@@ -59,7 +59,7 @@ def metni_nakisa_cevir(metin, font_yolu, font_boyutu=60, dikis_sikligi=2, dolgu_
 if __name__ == "__main__":
     # BURAYI İŞ YERİNDEKİ İHTİYACA GÖRE DEĞİŞTİREBİLİRSİN:
     AYARLAR = {
-        "metin": "PIVAZ", 
+        "metin": "SELMAN", 
         "font_yolu": "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", # GitHub Actions Linux font yolu
         "font_boyutu": 80,   # Yazı büyüklüğü
         "dikis_sikligi": 3,  # NE KADAR KÜÇÜKSE O KADAR SIK (2 veya 3 ideal dolgudur)
