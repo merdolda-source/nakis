@@ -2,67 +2,70 @@ import pyembroidery
 from PIL import Image, ImageFont, ImageDraw
 import numpy as np
 
-def metni_nakisa_cevir(metin, font_yolu, font_boyutu=60, dikis_sikligi=2, dolgu_kalinligi=3):
+def profesyonel_nakis_sistemi(metin, font_yolu, font_boyutu=100, siklik=4):
     pattern = pyembroidery.EmbPattern()
     
-    # 1. Metni Görsele Çevir (Yazı tipini analiz etmek için)
-    # Varsayılan bir font yükle veya belirtilen yolu kullan
+    # 1. Font Yükleme
     try:
         font = ImageFont.truetype(font_yolu, font_boyutu)
     except:
-        print("Font bulunamadı, varsayılan yükleniyor.")
         font = ImageFont.load_default()
 
-    # Metin boyutunu hesapla
+    # 2. Metni Analiz Et (Hassas Render)
     dummy_img = Image.new('L', (1, 1))
     draw = ImageDraw.Draw(dummy_img)
     bbox = draw.textbbox((0, 0), metin, font=font)
     w, h = bbox[2] - bbox[0], bbox[3] - bbox[1]
     
-    # Metni siyah-beyaz bir görsele çiz
-    img = Image.new('L', (w + 20, h + 20), 0)
+    img = Image.new('L', (w + 40, h + 40), 0)
     draw = ImageDraw.Draw(img)
-    draw.text((10, 10), metin, font=font, fill=255)
+    draw.text((20, 20), metin, font=font, fill=255)
     
     data = np.array(img)
     yukseklik, genislik = data.shape
 
-    # 2. Tarama Algoritması (Satin Fill / Sık Dolgu)
-    # Görseli dikeyde tarayarak dolu pikselleri dikişe çevirir
-    for x in range(0, genislik, dikis_sikligi):
+    # 3. Akıllı Segment Tarama (Boğulmayı önleyen kısım)
+    for x in range(0, genislik, siklik):
         sutun = data[:, x]
-        dolu_pikseller = np.where(sutun > 128)[0]
+        # Sütundaki dolu piksellerin gruplarını bul (Örn: 'P' harfinde üst ve alt iki ayrı parça)
+        dolu_indisler = np.where(sutun > 128)[0]
         
-        if len(dolu_pikseller) > 0:
-            ust_nokta = dolu_pikseller[0]
-            alt_nokta = dolu_pikseller[-1]
+        if len(dolu_indisler) > 0:
+            # Kesintisiz blokları bul (Harf boşluklarını korumak için)
+            gruplar = np.split(dolu_indisler, np.where(np.diff(dolu_indisler) > 1)[0] + 1)
             
-            # Koordinatları nakış birimine (10x) ve merkeze göre ayarla
-            nx = (x - genislik / 2) * 10
-            ny_ust = (ust_nokta - yukseklik / 2) * 10
-            ny_alt = (alt_nokta - yukseklik / 2) * 10
-            
-            # JUMP (Atlama) kontrolü: Eğer çok uzaktaysa iğneyi kaldır
-            if x == 0 or (x > 0 and len(np.where(data[:, x-dikis_sikligi] > 128)[0]) == 0):
+            for grup in gruplar:
+                if len(grup) < 2: continue # Çok küçük noktaları dikme (temiz görünüm)
+                
+                ust = grup[0]
+                alt = grup[-1]
+                
+                # Koordinat Dönüşümü (Janome MB-4 için)
+                nx = (x - genislik / 2) * 10
+                ny_ust = (ust - yukseklik / 2) * 10
+                ny_alt = (alt - yukseklik / 2) * 10
+                
+                # Her yeni parça başlangıcında JUMP yap (Boğulmayı ve ip karışıklığını önler)
                 pattern.add_stitch_absolute(pyembroidery.JUMP, int(nx), int(ny_ust))
-            
-            # Sık dolgu (Zikzak) dikişi
-            pattern.add_stitch_absolute(pyembroidery.STITCH, int(nx), int(ny_ust))
-            pattern.add_stitch_absolute(pyembroidery.STITCH, int(nx), int(ny_alt))
+                
+                # Zigzag Dolgu (Satin benzeri yapı)
+                pattern.add_stitch_absolute(pyembroidery.STITCH, int(nx), int(ny_ust))
+                pattern.add_stitch_absolute(pyembroidery.STITCH, int(nx + 2), int(ny_alt)) # Hafif eğim netlik kazandırır
 
-    # Dosyaları Kaydet
+    # 4. Temizlik ve Kayıt
     pattern = pattern.get_normalized_pattern()
-    pyembroidery.write(pattern, "ozel_tasarim.dst")
-    pyembroidery.write(pattern, "ozel_tasarim.jef")
-    print(f"'{metin}' yazısı başarıyla üretildi.")
+    
+    # MB-4'ün tanıması için isim ve format
+    pyembroidery.write(pattern, "pivaz_modern.dst")
+    pyembroidery.write(pattern, "pivaz_modern.jef")
+    print(f"'{metin}' için temiz ve profesyonel nakış dosyası hazırlandı.")
 
 if __name__ == "__main__":
-    # BURAYI İŞ YERİNDEKİ İHTİYACA GÖRE DEĞİŞTİREBİLİRSİN:
-    AYARLAR = {
+    # BURADAN AYARLARI YAPABİLİRSİN
+    PROFESYONEL_AYARLAR = {
         "metin": "SELMAN", 
-        "font_yolu": "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", # GitHub Actions Linux font yolu
-        "font_boyutu": 80,   # Yazı büyüklüğü
-        "dikis_sikligi": 3,  # NE KADAR KÜÇÜKSE O KADAR SIK (2 veya 3 ideal dolgudur)
+        "font_yolu": "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", # GitHub Linux yolu
+        "font_boyutu": 120, # Daha büyük harf = daha net sonuç
+        "siklik": 3        # 3-4 idealdir. 2 yaparsan çok sıkışır, boğulma yapar.
     }
-    
-    metni_nakisa_cevir(**AYARLAR)
+    profesyonel_nakis_sistemi(**PROFESYONEL_AYARLAR)
