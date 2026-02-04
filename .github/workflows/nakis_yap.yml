@@ -1,4 +1,4 @@
-name: Janome MB4 Tam Otomatik Üretim
+name: Janome MB4 Profesyonel Kesintisiz Üretim
 
 on:
   push:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       metin:
-        description: 'Nakış Yazısı'
+        description: 'Yazılacak Yazı'
         required: false
         default: 'PIVAZ'
       boyut:
@@ -37,11 +37,11 @@ jobs:
           import numpy as np
 
           def nakis_uret(metin, boyut_str):
-              # Boş değer gelirse varsayılan ayarlar
               metin = metin if metin else "PIVAZ"
               boyut = int(boyut_str) if boyut_str else 100
               
               pattern = pyembroidery.EmbPattern()
+              # Kalın font kullanımı netlik için kritiktir
               font_yolu = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
               
               try:
@@ -49,7 +49,7 @@ jobs:
               except:
                   font = ImageFont.load_default()
 
-              # 1. Metni Görsele Çiz
+              # 1. Metin Analizi
               dummy_img = Image.new('L', (1, 1))
               draw = ImageDraw.Draw(dummy_img)
               bbox = draw.textbbox((0, 0), metin, font=font)
@@ -63,15 +63,17 @@ jobs:
               data = np.array(img)
               yukseklik, genislik = data.shape
               
-              # 2. Dikiş Ayarları
-              ADIM = 4 # Dikiş sıklığı (Netlik için)
+              # 2. Profesyonel Nakış Ayarları
+              ADIM = 4          # Sargı sıklığı (Daha düşük = Daha sık)
+              SARG_GENISLIK = 2 # Kenar düzeltme payı
               
-              # 3. Akıllı Tarama (Makine Dostu)
+              # 3. Akıllı Sargı Döngüsü
               for x in range(0, genislik, ADIM):
                   sutun = data[:, x]
                   dolu = np.where(sutun > 128)[0]
                   
                   if len(dolu) > 0:
+                      # Harf parçalarını ayır (P'nin altı ve üstü gibi)
                       gruplar = np.split(dolu, np.where(np.diff(dolu) > 2)[0] + 1)
                       
                       for grup in gruplar:
@@ -82,24 +84,30 @@ jobs:
                           ny_ust = (ust - yukseklik / 2) * 10
                           ny_alt = (alt - yukseklik / 2) * 10
                           
-                          # Yeni harfe geçerken makineye 'TRIM' (İp Kes) komutu ver
-                          if x > 0 and len(np.where(data[:, x-ADIM] > 128)[0]) == 0:
-                              pattern.add_stitch_absolute(pyembroidery.TRIM, int(nx), int(ny_ust))
-                          
-                          # Underlay: Harf boğulmasın diye alta destek
-                          pattern.add_stitch_absolute(pyembroidery.STITCH, int(nx), int((ny_ust+ny_alt)/2))
-                          
-                          # Satin: Üste kaliteli sargı
+                          # --- KRİTİK: ATLAMA VE KESME KONTROLÜ ---
+                          # Eğer bir önceki adımda dikiş yoksa, buraya kesinlikle JUMP ile gel
+                          if x == 0 or len(np.where(data[:, x-ADIM] > 128)[0]) == 0:
+                              pattern.add_stitch_absolute(pyembroidery.JUMP, int(nx), int(ny_ust))
+                              # Makineye ipi kes komutu gönder (DST için en güvenlisi)
+                              pattern.add_command(pyembroidery.TRIM)
+
+                          # --- UNDERLAY (ALT DESTEK) ---
+                          # Harfin boğulmaması için önce zemin dikişi
+                          pattern.add_stitch_absolute(pyembroidery.STITCH, int(nx), int((ny_ust + ny_alt)/2))
+
+                          # --- SATIN (GERÇEK SARGI) ---
+                          # Bir üstten bir alttan zikzak yaparak harfi doldurur
                           pattern.add_stitch_absolute(pyembroidery.STITCH, int(nx), int(ny_ust))
                           pattern.add_stitch_absolute(pyembroidery.STITCH, int(nx + (ADIM/2)), int(ny_alt))
                   
               pattern.add_command(pyembroidery.END)
-              pattern = pattern.get_normalized_pattern()
+              
+              # Janome BECS sistemleri için DST formatı daha stabildir
               pyembroidery.write(pattern, "nakis_final.dst")
               pyembroidery.write(pattern, "nakis_final.jef")
 
           if __name__ == "__main__":
-              # GitHub inputlarını güvenli bir şekilde oku
+              import sys
               m = "${{ github.event.inputs.metin }}"
               b = "${{ github.event.inputs.boyut }}"
               nakis_uret(m, b)
@@ -109,7 +117,7 @@ jobs:
       - name: Dosyalari Yukle
         uses: actions/upload-artifact@v4
         with:
-          name: JANOME_MB4_CIKTI
+          name: JANOME_PROFESYONEL_CIKTI
           path: |
             nakis_final.dst
             nakis_final.jef
