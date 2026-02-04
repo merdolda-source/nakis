@@ -1,29 +1,107 @@
-name: Janome MB4 Kesin Cozum
+name: Janome MB4 Profesyonel Üretim Hattı
 
-on: [push, workflow_dispatch]
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      metin:
+        description: 'Nakış yapılacak yazı'
+        required: true
+        default: 'PIVAZ'
+      boyut:
+        description: 'Yazı Boyutu (60-150 arası önerilir)'
+        required: true
+        default: '100'
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Kodlari Cek
+      - name: Kodları Çek
         uses: actions/checkout@v4
 
-      - name: Python Hazirla
+      - name: Python Hazırla
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      - name: Gerekli Kutuphaneleri Kur
+      - name: Gerekli Kütüphaneleri Kur
         run: pip install pyembroidery Pillow numpy
 
-      - name: Nakis Dosyalarini Uret
-        run: python create_embroidery.py
+      - name: Nakış Sistemini Oluştur ve Çalıştır
+        run: |
+          cat <<EOF > create_embroidery.py
+          import pyembroidery
+          from PIL import Image, ImageFont, ImageDraw
+          import numpy as np
+          import sys
 
-      - name: Dosyalari Yukle
+          def uret(metin, boyut):
+              pattern = pyembroidery.EmbPattern()
+              # Yazı tipi yolu (GitHub runner üzerindeki standart font)
+              font_yolu = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+              try:
+                  font = ImageFont.truetype(font_yolu, int(boyut))
+              except:
+                  font = ImageFont.load_default()
+
+              # 1. Metin Analizi
+              dummy_img = Image.new('L', (1, 1))
+              draw = ImageDraw.Draw(dummy_img)
+              bbox = draw.textbbox((0, 0), metin, font=font)
+              w, h = bbox[2] - bbox[0], bbox[3] - bbox[1]
+              
+              img = Image.new('L', (w + 60, h + 60), 0)
+              draw = ImageDraw.Draw(img)
+              draw.text((30, 30), metin, font=font, fill=255)
+              img.save("onizleme.png") # Önizleme resmi oluşturur
+              
+              data = np.array(img)
+              yukseklik, genislik = data.shape
+              
+              # 2. Gelişmiş Tarama (Satin Fill + Segmentasyon)
+              # Harf boğulmasını önlemek için sütun sütun ama parçalı tarar
+              adim = 3 # Dikiş sıklığı
+              for x in range(0, genislik, adim):
+                  sutun = data[:, x]
+                  dolu_pikseller = np.where(sutun > 128)[0]
+                  
+                  if len(dolu_pikseller) > 0:
+                      # Harf içindeki boşlukları (P, A, B delikleri) bul
+                      gruplar = np.split(dolu_pikseller, np.where(np.diff(dolu_pikseller) > 1)[0] + 1)
+                      
+                      for grup in gruplar:
+                          if len(grup) < 2: continue
+                          ust, alt = grup[0], grup[-1]
+                          
+                          nx = (x - genislik / 2) * 10
+                          ny_ust = (ust - yukseklik / 2) * 10
+                          ny_alt = (alt - yukseklik / 2) * 10
+                          
+                          # Yeni parçaya geçişte ipi kes/atla
+                          pattern.add_stitch_absolute(pyembroidery.JUMP, int(nx), int(ny_ust))
+                          # Temiz sargı dikişi (Satin)
+                          pattern.add_stitch_absolute(pyembroidery.STITCH, int(nx), int(ny_ust))
+                          pattern.add_stitch_absolute(pyembroidery.STITCH, int(nx + 1.5), int(ny_alt))
+                  
+              pattern = pattern.get_normalized_pattern()
+              pyembroidery.write(pattern, "nakis_cikti.dst")
+              pyembroidery.write(pattern, "nakis_cikti.jef")
+              print("Dosyalar üretildi.")
+
+          if __name__ == "__main__":
+              metin_input = "${{ github.event.inputs.metin }}" or "PIVAZ"
+              boyut_input = "${{ github.event.inputs.boyut }}" or "100"
+              uret(metin_input, boyut_input)
+          EOF
+          python create_embroidery.py
+
+      - name: Sonuçları Paketle ve Sun
         uses: actions/upload-artifact@v4
         with:
-          name: JANOME_MB4_CIKTI
+          name: JANOME_MB4_PAKETI
           path: |
-            nakis_final.dst
-            nakis_final.jef
+            nakis_cikti.dst
+            nakis_cikti.jef
+            onizleme.png
