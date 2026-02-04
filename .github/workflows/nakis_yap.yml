@@ -1,4 +1,4 @@
-name: Janome MB4 Yazi Uretim PRO
+name: Janome MB4 Yazi Uretim PRO (Stroke Font)
 
 on:
   push:
@@ -9,14 +9,13 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
-    # === SADECE BURAYI DEĞİŞTİREREK YAZI / ÖLÇÜYÜ AYARLIYORSUN ===
+    # SADECE BURAYI DEĞİŞTİREREK YAZI / ÖLÇÜYÜ AYARLIYORSUN
     env:
       MB4_TEXT: "PIVAZ"          # İŞLENECEK YAZI / İSİM
       MB4_WIDTH_MM: "120"        # TOPLAM GENİŞLİK (mm)
       MB4_HEIGHT_MM: "70"        # TOPLAM YÜKSEKLİK (mm)
-      MB4_DENSITY: "3"           # DOLGU YOĞUNLUĞU (1=seyrek, 5=sık)
+      MB4_STROKE_MM: "1.8"       # HARF ÇİZGİ KALINLIĞI (mm, 1.2–2.5 arası idealdir)
       MB4_STITCH_LIMIT: "98000"  # MAKS. DİKİŞ SAYISI (MB4 için güvenli)
-      MB4_FONT_PATH: "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 
     steps:
       - name: Kodlari Cek
@@ -26,176 +25,422 @@ jobs:
         run: |
           cat << 'EOF' > create_mb4_text.py
           import os
+          import math
 
           import pyembroidery
-          from PIL import Image, ImageDraw, ImageFont
 
 
-          def clamp(value, min_v, max_v):
-              return max(min_v, min(value, max_v))
+          UNIT = 10  # 10 birim = 1 mm (DST/JEF standart)
 
 
-          def density_params(density: int):
-              """
-              density: 1 (seyrek) - 5 (sık)
-              Sonuç: (satir_arasi_mm, dikiş_arasi_mm)
-              """
-              density = clamp(density, 1, 5)
-              # 1 -> (1.5, 2.5), 3 -> (1.1, 1.9), 5 -> (0.7, 1.3)
-              row_mm = 1.5 - 0.2 * (density - 1)
-              stitch_mm = 2.5 - 0.3 * (density - 1)
-              row_mm = max(0.6, row_mm)
-              stitch_mm = max(1.0, stitch_mm)
-              return row_mm, stitch_mm
+          # Basit blok büyük harf fontu (0..1 aralığında koordinatlar)
+          # Her harf: [ (x1,y1,x2,y2), ... ]
+          def rect(x1, y1, x2, y2):
+              return [
+                  (x1, y1, x2, y1),
+                  (x2, y1, x2, y2),
+                  (x2, y2, x1, y2),
+                  (x1, y2, x1, y1),
+              ]
+
+
+          FONT = {}
+
+          # A
+          FONT["A"] = [
+              (0.0, 0.0, 0.5, 1.0),
+              (1.0, 0.0, 0.5, 1.0),
+              (0.2, 0.5, 0.8, 0.5),
+          ]
+
+          # B (yaklaşık blok B)
+          FONT["B"] = [
+              (0.0, 0.0, 0.0, 1.0),
+              (0.0, 1.0, 0.7, 1.0),
+              (0.7, 1.0, 0.7, 0.5),
+              (0.7, 0.5, 0.0, 0.5),
+              (0.0, 0.5, 0.7, 0.5),
+              (0.7, 0.5, 0.7, 0.0),
+              (0.7, 0.0, 0.0, 0.0),
+          ]
+
+          # C
+          FONT["C"] = [
+              (0.9, 0.1, 0.1, 0.1),
+              (0.1, 0.1, 0.1, 0.9),
+              (0.1, 0.9, 0.9, 0.9),
+          ]
+
+          # D
+          FONT["D"] = [
+              (0.0, 0.0, 0.0, 1.0),
+              (0.0, 1.0, 0.7, 0.8),
+              (0.7, 0.8, 0.7, 0.2),
+              (0.7, 0.2, 0.0, 0.0),
+          ]
+
+          # E
+          FONT["E"] = [
+              (0.9, 0.0, 0.1, 0.0),
+              (0.1, 0.0, 0.1, 1.0),
+              (0.1, 1.0, 0.9, 1.0),
+              (0.1, 0.5, 0.7, 0.5),
+          ]
+
+          # F
+          FONT["F"] = [
+              (0.1, 0.0, 0.1, 1.0),
+              (0.1, 1.0, 0.9, 1.0),
+              (0.1, 0.5, 0.7, 0.5),
+          ]
+
+          # G
+          FONT["G"] = [
+              (0.9, 0.1, 0.1, 0.1),
+              (0.1, 0.1, 0.1, 0.9),
+              (0.1, 0.9, 0.9, 0.9),
+              (0.9, 0.9, 0.9, 0.5),
+              (0.9, 0.5, 0.6, 0.5),
+          ]
+
+          # H
+          FONT["H"] = [
+              (0.1, 0.0, 0.1, 1.0),
+              (0.9, 0.0, 0.9, 1.0),
+              (0.1, 0.5, 0.9, 0.5),
+          ]
+
+          # I
+          FONT["I"] = [
+              (0.1, 1.0, 0.9, 1.0),
+              (0.5, 1.0, 0.5, 0.0),
+              (0.1, 0.0, 0.9, 0.0),
+          ]
+
+          # J
+          FONT["J"] = [
+              (0.1, 0.0, 0.7, 0.0),
+              (0.7, 0.0, 0.7, 1.0),
+              (0.7, 1.0, 0.1, 1.0),
+          ]
+
+          # K
+          FONT["K"] = [
+              (0.1, 0.0, 0.1, 1.0),
+              (0.1, 0.5, 0.9, 1.0),
+              (0.1, 0.5, 0.9, 0.0),
+          ]
+
+          # L
+          FONT["L"] = [
+              (0.1, 0.0, 0.1, 1.0),
+              (0.1, 0.0, 0.9, 0.0),
+          ]
+
+          # M
+          FONT["M"] = [
+              (0.0, 0.0, 0.0, 1.0),
+              (0.0, 1.0, 0.5, 0.5),
+              (0.5, 0.5, 1.0, 1.0),
+              (1.0, 1.0, 1.0, 0.0),
+          ]
+
+          # N
+          FONT["N"] = [
+              (0.0, 0.0, 0.0, 1.0),
+              (0.0, 1.0, 1.0, 0.0),
+              (1.0, 0.0, 1.0, 1.0),
+          ]
+
+          # O
+          FONT["O"] = rect(0.1, 0.1, 0.9, 0.9)
+
+          # P
+          FONT["P"] = [
+              (0.1, 0.0, 0.1, 1.0),
+              (0.1, 1.0, 0.8, 1.0),
+              (0.8, 1.0, 0.8, 0.5),
+              (0.8, 0.5, 0.1, 0.5),
+          ]
+
+          # Q
+          FONT["Q"] = rect(0.1, 0.1, 0.9, 0.9) + [
+              (0.6, 0.1, 0.9, 0.0),
+          ]
+
+          # R
+          FONT["R"] = [
+              (0.1, 0.0, 0.1, 1.0),
+              (0.1, 1.0, 0.8, 1.0),
+              (0.8, 1.0, 0.8, 0.5),
+              (0.8, 0.5, 0.1, 0.5),
+              (0.1, 0.5, 0.9, 0.0),
+          ]
+
+          # S
+          FONT["S"] = [
+              (0.9, 0.1, 0.1, 0.1),
+              (0.1, 0.1, 0.1, 0.5),
+              (0.1, 0.5, 0.9, 0.5),
+              (0.9, 0.5, 0.9, 0.9),
+              (0.9, 0.9, 0.1, 0.9),
+          ]
+
+          # T
+          FONT["T"] = [
+              (0.1, 1.0, 0.9, 1.0),
+              (0.5, 1.0, 0.5, 0.0),
+          ]
+
+          # U
+          FONT["U"] = [
+              (0.1, 0.0, 0.1, 1.0),
+              (0.9, 0.0, 0.9, 1.0),
+              (0.1, 0.0, 0.9, 0.0),
+          ]
+
+          # V
+          FONT["V"] = [
+              (0.0, 1.0, 0.5, 0.0),
+              (0.5, 0.0, 1.0, 1.0),
+          ]
+
+          # W
+          FONT["W"] = [
+              (0.0, 1.0, 0.25, 0.0),
+              (0.25, 0.0, 0.5, 0.5),
+              (0.5, 0.5, 0.75, 0.0),
+              (0.75, 0.0, 1.0, 1.0),
+          ]
+
+          # X
+          FONT["X"] = [
+              (0.0, 0.0, 1.0, 1.0),
+              (0.0, 1.0, 1.0, 0.0),
+          ]
+
+          # Y
+          FONT["Y"] = [
+              (0.0, 1.0, 0.5, 0.5),
+              (1.0, 1.0, 0.5, 0.5),
+              (0.5, 0.5, 0.5, 0.0),
+          ]
+
+          # Z
+          FONT["Z"] = [
+              (0.0, 1.0, 1.0, 1.0),
+              (1.0, 1.0, 0.0, 0.0),
+              (0.0, 0.0, 1.0, 0.0),
+          ]
+
+          # Basit rakamlar (000-999 isimlerde işine yarar)
+          FONT["0"] = rect(0.1, 0.1, 0.9, 0.9)
+          FONT["1"] = [
+              (0.5, 0.0, 0.5, 1.0),
+              (0.3, 0.0, 0.7, 0.0),
+          ]
+          FONT["2"] = [
+              (0.1, 0.1, 0.9, 0.1),
+              (0.9, 0.1, 0.9, 0.5),
+              (0.9, 0.5, 0.1, 0.5),
+              (0.1, 0.5, 0.1, 0.9),
+              (0.1, 0.9, 0.9, 0.9),
+          ]
+          FONT["3"] = [
+              (0.1, 0.1, 0.9, 0.1),
+              (0.9, 0.1, 0.9, 0.9),
+              (0.1, 0.5, 0.9, 0.5),
+              (0.1, 0.9, 0.9, 0.9),
+          ]
+          FONT["4"] = [
+              (0.1, 0.1, 0.1, 0.5),
+              (0.1, 0.5, 0.9, 0.5),
+              (0.9, 0.1, 0.9, 1.0),
+          ]
+          FONT["5"] = [
+              (0.9, 0.1, 0.1, 0.1),
+              (0.1, 0.1, 0.1, 0.5),
+              (0.1, 0.5, 0.9, 0.5),
+              (0.9, 0.5, 0.9, 0.9),
+              (0.9, 0.9, 0.1, 0.9),
+          ]
+          FONT["6"] = [
+              (0.9, 0.1, 0.1, 0.1),
+              (0.1, 0.1, 0.1, 0.9),
+              (0.1, 0.5, 0.9, 0.5),
+              (0.1, 0.9, 0.9, 0.9),
+              (0.9, 0.5, 0.9, 0.9),
+          ]
+          FONT["7"] = [
+              (0.1, 0.9, 0.9, 0.9),
+              (0.9, 0.9, 0.1, 0.1),
+          ]
+          FONT["8"] = rect(0.1, 0.1, 0.9, 0.9) + [
+              (0.1, 0.5, 0.9, 0.5),
+          ]
+          FONT["9"] = [
+              (0.1, 0.9, 0.9, 0.9),
+              (0.9, 0.9, 0.9, 0.1),
+              (0.9, 0.5, 0.1, 0.5),
+              (0.1, 0.5, 0.1, 0.1),
+          ]
+
+          # Her harfin genişliği (normalized). Çoğu 1.0
+          ADVANCE = {ch: 1.0 for ch in FONT.keys()}
+          ADVANCE["I"] = 0.6
+          ADVANCE["1"] = 0.6
+
+
+          # Türkçe karakterleri Latin’e çevir
+          REMAP_TR = {
+              "Ç": "C",
+              "Ğ": "G",
+              "İ": "I",
+              "I": "I",
+              "Ö": "O",
+              "Ş": "S",
+              "Ü": "U",
+          }
+
+
+          def satin_line(add_stitch, x1, y1, x2, y2, stroke_mm, stitch_limit):
+              """Verilen çizgiyi kalın kolon (satin hissi) gibi doldurur."""
+              width_units = stroke_mm * UNIT
+              dx = x2 - x1
+              dy = y2 - y1
+              length = math.hypot(dx, dy)
+              if length == 0:
+                  return
+
+              nx = -dy / length
+              ny = dx / length
+
+              half = width_units / 2.0
+              lane_step = UNIT  # 1 mm aralık
+              lane = -half
+              direction = 1
+
+              while lane <= half:
+                  sx = x1 + nx * lane
+                  sy = y1 + ny * lane
+                  ex = x2 + nx * lane
+                  ey = y2 + ny * lane
+
+                  # çizgi boyunca dikiş aralığı ~2 mm
+                  steps = max(int(length / (2 * UNIT)), 1)
+
+                  if direction == 1:
+                      add_stitch(pyembroidery.JUMP, sx, sy, stitch_limit)
+                      for i in range(1, steps + 1):
+                          t = i / steps
+                          x = sx + (ex - sx) * t
+                          y = sy + (ey - sy) * t
+                          add_stitch(pyembroidery.STITCH, x, y, stitch_limit)
+                  else:
+                      add_stitch(pyembroidery.JUMP, ex, ey, stitch_limit)
+                      for i in range(1, steps + 1):
+                          t = i / steps
+                          x = ex + (sx - ex) * t
+                          y = ey + (sy - ey) * t
+                          add_stitch(pyembroidery.STITCH, x, y, stitch_limit)
+
+                  direction *= -1
+                  lane += lane_step
 
 
           def create_mb4_text():
-              UNIT = 10  # 10 birim = 1 mm (DST/JEF ölçeği)
-
-              # --- Ortam değişkenlerinden ayarlar ---
-              text = os.getenv("MB4_TEXT", "PIVAZ").strip() or "MB4"
+              text_raw = os.getenv("MB4_TEXT", "PIVAZ")
               width_mm = float(os.getenv("MB4_WIDTH_MM", "120"))
               height_mm = float(os.getenv("MB4_HEIGHT_MM", "70"))
-              density_raw = os.getenv("MB4_DENSITY", "3")
-              try:
-                  density = int(density_raw)
-              except ValueError:
-                  density = 3
+              stroke_mm = float(os.getenv("MB4_STROKE_MM", "1.8"))
               stitch_limit = int(os.getenv("MB4_STITCH_LIMIT", "98000"))
-              font_path = os.getenv(
-                  "MB4_FONT_PATH",
-                  "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-              )
 
-              # --- 1) Yazıyı resim olarak çiz ---
-              img_w, img_h = 800, 400  # çalışma alanı
-              img = Image.new("L", (img_w, img_h), 0)
-              draw = ImageDraw.Draw(img)
+              # Yazıyı normalize et: büyük harf + TR -> Latin
+              text_norm = []
+              for ch in text_raw:
+                  up = ch.upper()
+                  up = REMAP_TR.get(up, up)
+                  text_norm.append(up)
+              text = "".join(text_norm)
 
-              try:
-                  font = ImageFont.truetype(font_path, size=int(img_h * 0.7))
-              except OSError:
-                  # Font bulunamazsa yine de çalışsın
-                  font = ImageFont.load_default()
+              # Toplam normalleştirilmiş genişlik
+              SPACE_ADV = 0.5
+              LETTER_SPACING = 0.3
 
-              bbox_text = draw.textbbox((0, 0), text, font=font)
-              text_w = bbox_text[2] - bbox_text[0]
-              text_h = bbox_text[3] - bbox_text[1]
+              norm_width = 0.0
+              for ch in text:
+                  if ch == " ":
+                      norm_width += SPACE_ADV
+                  elif ch in FONT:
+                      norm_width += ADVANCE.get(ch, 1.0) + LETTER_SPACING
+                  # bilinmeyen karakterleri atlıyoruz
 
-              x = (img_w - text_w) // 2 - bbox_text[0]
-              y = (img_h - text_h) // 2 - bbox_text[1]
-              draw.text((x, y), text, fill=255, font=font)
+              if norm_width == 0.0:
+                  norm_width = 1.0
 
-              # Önizleme için PNG kaydet (kontrol amaçlı)
-              img.convert("RGB").save("mb4_preview.png")
-
-              # Gerçek dolu alan bounding box
-              bbox = img.getbbox()
-              if not bbox:
-                  raise ValueError("Yazı boş çıktı, MB4_TEXT ayarını kontrol et.")
-              left, top, right, bottom = bbox
-
-              # PIL bbox: right, bottom EXCLUSIVE -> inclusive'e çevir
-              right -= 1
-              bottom -= 1
-
-              text_w_px = right - left + 1
-              text_h_px = bottom - top + 1
-
-              # --- 2) Piksel -> nakış ölçeği ---
               width_units = width_mm * UNIT
               height_units = height_mm * UNIT
 
-              scale_x = width_units / float(text_w_px)
-              scale_y = height_units / float(text_h_px)
+              scale_x = width_units / norm_width
+              scale_y = height_units / 1.0  # font yüksekliği 1.0
               scale = min(scale_x, scale_y)
 
-              cx_px = (left + right) / 2.0
-              cy_px = (top + bottom) / 2.0
-
-              mm_per_px = scale / UNIT
-
-              row_mm, stitch_mm = density_params(density)
-
-              # satırlar arası piksel adımı
-              row_step_px = max(1, int(round(row_mm / mm_per_px)))
-              # dikişler arası piksel adımı
-              stitch_step_px = max(1, int(round(stitch_mm / mm_per_px)))
-
-              # --- 3) Tatami dolgu (yatay satırlar) ---
               pattern = pyembroidery.EmbPattern()
               total_stitches = 0
 
-              def add_stitch(cmd, x_units, y_units):
+              def add_stitch(cmd, x_u, y_u, limit):
                   nonlocal total_stitches
-                  if total_stitches >= stitch_limit:
+                  if total_stitches >= limit:
                       return
                   pattern.add_stitch_absolute(
                       cmd,
-                      int(round(x_units)),
-                      int(round(y_units)),
+                      int(round(x_u)),
+                      int(round(y_u)),
                   )
                   if cmd in (pyembroidery.STITCH, pyembroidery.JUMP, pyembroidery.TRIM):
                       total_stitches += 1
 
-              pixels = img.load()
+              # Harfleri sırayla yerleştir
+              cursor = 0.0
+              for ch in text:
+                  if ch == " ":
+                      cursor += SPACE_ADV
+                      continue
+                  if ch not in FONT:
+                      # desteklenmeyen karakteri atla
+                      cursor += SPACE_ADV
+                      continue
 
-              # Yatay satırlar boyunca dolu segmentleri bulup doldur
-              for y_px in range(top, bottom + 1, row_step_px):
-                  inside_segment = False
-                  seg_start = None
+                  adv = ADVANCE.get(ch, 1.0)
+                  x_off = cursor
+                  strokes = FONT[ch]
 
-                  for x_px in range(left, right + 1):
-                      val = pixels[x_px, y_px]
+                  for (x1, y1, x2, y2) in strokes:
+                      # Normalleştirilmiş koordinattan gerçek birime geç
+                      x1n = x_off + x1
+                      x2n = x_off + x2
+                      y1n = y1
+                      y2n = y2
 
-                      if not inside_segment and val >= 128:
-                          # beyaza girdik -> segment başı
-                          inside_segment = True
-                          seg_start = x_px
-                      elif inside_segment and val < 128:
-                          # segment bitti
-                          inside_segment = False
-                          seg_end = x_px - 1
+                      # Metnin ortasını 0,0 yap
+                      x1u = (x1n - norm_width / 2.0) * scale
+                      x2u = (x2n - norm_width / 2.0) * scale
+                      y1u = (y1n - 0.5) * scale
+                      y2u = (y2n - 0.5) * scale
 
-                          start_px = seg_start
-                          end_px = seg_end
-                          y_units = (y_px - cy_px) * scale
+                      satin_line(add_stitch, x1u, y1u, x2u, y2u, stroke_mm, stitch_limit)
 
-                          # Segment başına JUMP
-                          x0_units = (start_px - cx_px) * scale
-                          add_stitch(pyembroidery.JUMP, x0_units, y_units)
+                  cursor += adv + LETTER_SPACING
 
-                          # Segmenti STITCH ile doldur (max ~2-3mm aralık)
-                          for xx in range(start_px, end_px + 1, stitch_step_px):
-                              x_units = (xx - cx_px) * scale
-                              add_stitch(pyembroidery.STITCH, x_units, y_units)
-
-                  # Satır sonunda hâlâ segment içindeysek onu da kapat
-                  if inside_segment:
-                      seg_end = right
-                      start_px = seg_start
-                      end_px = seg_end
-                      y_units = (y_px - cy_px) * scale
-
-                      x0_units = (start_px - cx_px) * scale
-                      add_stitch(pyembroidery.JUMP, x0_units, y_units)
-
-                      for xx in range(start_px, end_px + 1, stitch_step_px):
-                          x_units = (xx - cx_px) * scale
-                          add_stitch(pyembroidery.STITCH, x_units, y_units)
-
-              # Merkeze normalize et, desen sonu
               pattern = pattern.get_normalized_pattern()
               pattern.end()
 
-              # Çıkış dosyaları
               pyembroidery.write(pattern, "mb4_text.dst")
               pyembroidery.write(pattern, "mb4_text.jef")
 
               print("Metin:", text)
-              print("Genişlik x Yükseklik (mm):", width_mm, "x", height_mm)
-              print("Yoğunluk:", density, "(1=seyrek, 5=sık)")
               print("Toplam dikiş:", total_stitches)
+              print("Norm genişlik:", norm_width, " ölçek:", scale)
 
 
           if __name__ == "__main__":
@@ -207,11 +452,9 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Kütüphaneleri Kur
+      - name: Kutuphaneleri Kur
         run: |
-          sudo apt-get update -y
-          sudo apt-get install -y fonts-dejavu-core
-          pip install pyembroidery pillow
+          pip install pyembroidery
 
       - name: Nakis Dosyalarini Uret
         run: python create_mb4_text.py
@@ -223,4 +466,3 @@ jobs:
           path: |
             mb4_text.dst
             mb4_text.jef
-            mb4_preview.png
