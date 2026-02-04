@@ -1,37 +1,29 @@
-name: Janome MB4 Logo Nakis (Repo logo.png)
+name: Janome MB4 Uretim
 
-on:
-  push:
-    branches: [ "main" ]
-  workflow_dispatch:
+on: [push, workflow_dispatch]
 
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
-      - name: 📥 Repo Kodlarini Cek
+      - name: Kodlari Cek
         uses: actions/checkout@v4
 
-      - name: 🐍 Python Kur
+      - name: Python Hazirla
         uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          python-version: '3.10'
 
-      - name: 📦 Kutuphaneleri Kur
-        run: |
-          python -m pip install --upgrade pip
-          pip install pyembroidery pillow
+      - name: Kütüphane Kur
+        run: pip install pyembroidery
 
-      - name: 🧵 logo.png ile Nakis Uret
-        run: |
-          python create_bloklu_nakis.py
+      - name: Dosyalari Uret
+        run: python create_pivaz.py
 
-      - name: 📤 Nakis + JPG Onizleme Yukle
+      - name: Dosyalari Yukle
         uses: actions/upload-artifact@v4
         with:
-          name: JANOME_MB4_LOGO_FINAL
+          name: JANOME_MB4_FINAL
           path: |
-            logo_nakis.dst
-            logo_nakis.jef
-            logo_onizleme.jpg
+            pivaz_cikti.dst
+            pivaz_cikti.jef
