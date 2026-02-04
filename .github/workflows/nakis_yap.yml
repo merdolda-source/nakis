@@ -1,4 +1,4 @@
-name: Janome MB4 Modern Uretim
+name: Janome MB4 Modern Serif Uretim
 
 on:
   push:
@@ -20,90 +20,77 @@ jobs:
       - name: Kutuphane Kur
         run: pip install pyembroidery
 
-      - name: Python Dosyasini Olustur (create_pivaz.py)
+      - name: Modern Tasarim Kodunu Olustur
         run: |
           cat <<EOF > create_pivaz.py
           import pyembroidery
           import math
 
-          def create_satin_stitch(pattern, x1, y1, x2, y2, width=30):
-              # Çizginin açısını hesapla
-              angle = math.atan2(y2 - y1, x2 - x1)
-              # Dik açıyı bul (Saten dikiş için sağa sola kayma)
-              perp_angle = angle + math.pi / 2
-              
-              dx = math.cos(perp_angle) * width
-              dy = math.sin(perp_angle) * width
-              
-              distance = math.sqrt((x2 - x1)**2 + (y2 - y1)**2)
-              steps = int(distance // 10)  # Her 1mm'de bir iğne vuruşu
-              if steps < 1: steps = 1
-              
-              for i in range(steps + 1):
-                  ratio = i / steps
-                  curr_x = x1 + (x2 - x1) * ratio
-                  curr_y = y1 + (y2 - y1) * ratio
+          def add_satin_path(pattern, points, width=35):
+              """Noktalar arasını modern saten dikişle doldurur"""
+              for i in range(len(points) - 1):
+                  x1, y1 = points[i]
+                  x2, y2 = points[i+1]
                   
-                  # Zigzag hareketleri
-                  if i % 2 == 0:
-                      pattern.add_stitch_absolute(pyembroidery.STITCH, int(curr_x + dx), int(curr_y + dy))
-                  else:
-                      pattern.add_stitch_absolute(pyembroidery.STITCH, int(curr_x - dx), int(curr_y - dy))
+                  angle = math.atan2(y2 - y1, x2 - x1)
+                  perp_angle = angle + math.pi / 2
+                  dx, dy = math.cos(perp_angle) * width, math.sin(perp_angle) * width
+                  
+                  distance = math.sqrt((x2-x1)**2 + (y2-y1)**2)
+                  steps = int(distance // 8) # Daha sık dikiş (0.8mm)
+                  if steps < 1: steps = 1
+                  
+                  for j in range(steps + 1):
+                      ratio = j / steps
+                      cx, cy = x1 + (x2-x1)*ratio, y1 + (y2-y1)*ratio
+                      if j % 2 == 0:
+                          pattern.add_stitch_absolute(pyembroidery.STITCH, int(cx + dx), int(cy + dy))
+                      else:
+                          pattern.add_stitch_absolute(pyembroidery.STITCH, int(cx - dx), int(cy - dy))
 
-          def mb4_modern_pivaz():
+          def ciz():
               pattern = pyembroidery.EmbPattern()
-              w = 40  # Harf kalınlığı (4mm) - Dolgun görünüm için
+              w = 32 # Modern, ince-orta hat kalınlığı
 
-              # P Harfi
-              pattern.add_stitch_absolute(pyembroidery.JUMP, -500, 300)
-              create_satin_stitch(pattern, -500, 300, -500, -300, w)
-              create_satin_stitch(pattern, -500, -300, -300, -300, w)
-              create_satin_stitch(pattern, -300, -300, -300, 0, w)
-              create_satin_stitch(pattern, -300, 0, -500, 0, w)
+              # P - Modern Dar Kesim
+              pattern.add_stitch_absolute(pyembroidery.JUMP, -450, 350)
+              add_satin_path(pattern, [(-450, 350), (-450, -350)], w)
+              add_satin_path(pattern, [(-450, -350), (-250, -350), (-250, -50), (-450, -50)], w)
 
-              # I Harfi
-              pattern.add_stitch_absolute(pyembroidery.JUMP, -200, 300)
-              create_satin_stitch(pattern, -200, 300, -200, -300, w)
+              # I - Sans-Serif (Basit ve Net)
+              pattern.add_stitch_absolute(pyembroidery.JUMP, -150, 350)
+              add_satin_path(pattern, [(-150, 350), (-150, -350)], w)
 
-              # V Harfi
-              pattern.add_stitch_absolute(pyembroidery.JUMP, -100, -300)
-              create_satin_stitch(pattern, -100, -300, 0, 300, w)
-              create_satin_stitch(pattern, 0, 300, 100, -300, w)
+              # V - Keskin Açılı Modern
+              pattern.add_stitch_absolute(pyembroidery.JUMP, -50, -350)
+              add_satin_path(pattern, [(-50, -350), (100, 350), (250, -350)], w)
 
-              # A Harfi
-              pattern.add_stitch_absolute(pyembroidery.JUMP, 200, 300)
-              create_satin_stitch(pattern, 200, 300, 350, -300, w)
-              create_satin_stitch(pattern, 350, -300, 500, 300, w)
-              # Orta çizgi
-              pattern.add_stitch_absolute(pyembroidery.JUMP, 275, 0)
-              create_satin_stitch(pattern, 275, 0, 425, 0, w)
+              # A - Modern (Orta çizgi biraz aşağıda)
+              pattern.add_stitch_absolute(pyembroidery.JUMP, 300, 350)
+              add_satin_path(pattern, [(300, 350), (450, -350), (600, 350)], w)
+              pattern.add_stitch_absolute(pyembroidery.JUMP, 370, 100)
+              add_satin_path(pattern, [(370, 100), (530, 100)], w)
 
-              # Z Harfi
-              pattern.add_stitch_absolute(pyembroidery.JUMP, 600, -300)
-              create_satin_stitch(pattern, 600, -300, 800, -300, w)
-              create_satin_stitch(pattern, 800, -300, 600, 300, w)
-              create_satin_stitch(pattern, 600, 300, 800, 300, w)
+              # Z - Dinamik Eğimli
+              pattern.add_stitch_absolute(pyembroidery.JUMP, 650, -350)
+              add_satin_path(pattern, [(650, -350), (850, -350), (650, 350), (850, 350)], w)
 
               pattern.end()
-              
-              # MB-4 uyumluluğu için normalize et
-              final_pattern = pattern.get_normalized_pattern()
-              
-              pyembroidery.write(final_pattern, "pivaz_modern.dst")
-              pyembroidery.write(final_pattern, "pivaz_modern.jef")
-              print("Modern Saten Nakis Dosyalari Basariyla Uretildi.")
+              final = pattern.get_normalized_pattern()
+              pyembroidery.write(final, "pivaz_modern.dst")
+              pyembroidery.write(final, "pivaz_modern.jef")
 
           if __name__ == "__main__":
-              mb4_modern_pivaz()
+              ciz()
           EOF
 
-      - name: Dosyalari Uret (Scripti Calistir)
+      - name: Calistir ve Uret
         run: python create_pivaz.py
 
-      - name: Dosyalari Artifact Olarak Yukle
+      - name: Dosyalari Yukle
         uses: actions/upload-artifact@v4
         with:
-          name: PIVAZ_MODERN_JANOME
+          name: PIVAZ_ROBOTO_STYLE
           path: |
             pivaz_modern.dst
             pivaz_modern.jef
