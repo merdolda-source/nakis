@@ -2,16 +2,17 @@ import pyembroidery
 from PIL import Image, ImageFont, ImageDraw
 import numpy as np
 
-def profesyonel_nakis_sistemi(metin, font_yolu, font_boyutu=100, siklik=4):
+def profesyonel_nakis_uretimi(metin="PIVAZ", font_boyutu=100, siklik=3):
     pattern = pyembroidery.EmbPattern()
     
-    # 1. Font Yükleme
+    # 1. Fontu Hazırla (Linux standart yolu)
+    font_yolu = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
     try:
         font = ImageFont.truetype(font_yolu, font_boyutu)
     except:
         font = ImageFont.load_default()
 
-    # 2. Metni Analiz Et (Hassas Render)
+    # 2. Metin Analizi
     dummy_img = Image.new('L', (1, 1))
     draw = ImageDraw.Draw(dummy_img)
     bbox = draw.textbbox((0, 0), metin, font=font)
@@ -24,48 +25,39 @@ def profesyonel_nakis_sistemi(metin, font_yolu, font_boyutu=100, siklik=4):
     data = np.array(img)
     yukseklik, genislik = data.shape
 
-    # 3. Akıllı Segment Tarama (Boğulmayı önleyen kısım)
+    # 3. Akıllı Nakış İşleme (Underlay + Satin)
     for x in range(0, genislik, siklik):
         sutun = data[:, x]
-        # Sütundaki dolu piksellerin gruplarını bul (Örn: 'P' harfinde üst ve alt iki ayrı parça)
         dolu_indisler = np.where(sutun > 128)[0]
         
         if len(dolu_indisler) > 0:
-            # Kesintisiz blokları bul (Harf boşluklarını korumak için)
             gruplar = np.split(dolu_indisler, np.where(np.diff(dolu_indisler) > 1)[0] + 1)
             
             for grup in gruplar:
-                if len(grup) < 2: continue # Çok küçük noktaları dikme (temiz görünüm)
+                if len(grup) < 3: continue
                 
                 ust = grup[0]
                 alt = grup[-1]
-                
-                # Koordinat Dönüşümü (Janome MB-4 için)
                 nx = (x - genislik / 2) * 10
                 ny_ust = (ust - yukseklik / 2) * 10
                 ny_alt = (alt - yukseklik / 2) * 10
-                
-                # Her yeni parça başlangıcında JUMP yap (Boğulmayı ve ip karışıklığını önler)
-                pattern.add_stitch_absolute(pyembroidery.JUMP, int(nx), int(ny_ust))
-                
-                # Zigzag Dolgu (Satin benzeri yapı)
-                pattern.add_stitch_absolute(pyembroidery.STITCH, int(nx), int(ny_ust))
-                pattern.add_stitch_absolute(pyembroidery.STITCH, int(nx + 2), int(ny_alt)) # Hafif eğim netlik kazandırır
 
-    # 4. Temizlik ve Kayıt
+                # --- UNDERLAY (Alt Destek): Boğulmayı önleyen sihirli dikiş ---
+                # Harfin tam ortasına tek bir dikiş atarak zemini sabitler
+                orta_y = (ny_ust + ny_alt) / 2
+                pattern.add_stitch_absolute(pyembroidery.JUMP, int(nx), int(ny_ust))
+                pattern.add_stitch_absolute(pyembroidery.STITCH, int(nx), int(orta_y))
+
+                # --- SATIN (Üst Dolgu): Gerçek dolgun görünüm ---
+                pattern.add_stitch_absolute(pyembroidery.STITCH, int(nx), int(ny_ust))
+                pattern.add_stitch_absolute(pyembroidery.STITCH, int(nx + (siklik/2)), int(ny_alt))
+
+    # 4. Kayıt (İsimleri YAML ile eşliyoruz)
     pattern = pattern.get_normalized_pattern()
-    
-    # MB-4'ün tanıması için isim ve format
-    pyembroidery.write(pattern, "pivaz_modern.dst")
-    pyembroidery.write(pattern, "pivaz_modern.jef")
-    print(f"'{metin}' için temiz ve profesyonel nakış dosyası hazırlandı.")
+    pyembroidery.write(pattern, "nakis_final.dst")
+    pyembroidery.write(pattern, "nakis_final.jef")
+    print(f"'{metin}' dosyası başarıyla oluşturuldu.")
 
 if __name__ == "__main__":
-    # BURADAN AYARLARI YAPABİLİRSİN
-    PROFESYONEL_AYARLAR = {
-        "metin": "SELMAN", 
-        "font_yolu": "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", # GitHub Linux yolu
-        "font_boyutu": 120, # Daha büyük harf = daha net sonuç
-        "siklik": 3        # 3-4 idealdir. 2 yaparsan çok sıkışır, boğulma yapar.
-    }
-    profesyonel_nakis_sistemi(**PROFESYONEL_AYARLAR)
+    # Buradaki değerleri iş yerine göre manuel de değiştirebilirsin
+    profesyonel_nakis_uretimi(metin="PIVAZ", font_boyutu=110, siklik=4)
