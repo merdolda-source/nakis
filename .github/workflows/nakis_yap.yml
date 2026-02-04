@@ -8,7 +8,7 @@ on:
       metin:
         description: 'Nakış yapılacak yazı'
         required: true
-        default: 'PIVAZ'
+        default: 'SELMAN'
       boyut:
         description: 'Yazı Boyutu (60-150 arası önerilir)'
         required: true
