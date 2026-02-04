@@ -1,18 +1,6 @@
-name: Janome MB4 Profesyonel Uretim Hattı
+name: Janome MB4 Kesin Cozum
 
-on:
-  push:
-    branches: [ main ]
-  workflow_dispatch:
-    inputs:
-      metin:
-        description: 'Nakış yapılacak yazı'
-        required: true
-        default: 'PIVAZ'
-      boyut:
-        description: 'Font Boyutu (40-150)'
-        required: true
-        default: '80'
+on: [push, workflow_dispatch]
 
 jobs:
   build:
@@ -26,17 +14,16 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Gerekli Kütüphaneleri Kur
+      - name: Gerekli Kutuphaneleri Kur
         run: pip install pyembroidery Pillow numpy
 
-      - name: Nakış Dosyasını Üret
-        # Manuel tetiklemede girilen yazıyı kullanır, yoksa varsayılanı yapar
+      - name: Nakis Dosyalarini Uret
         run: python create_embroidery.py
 
       - name: Dosyalari Yukle
         uses: actions/upload-artifact@v4
         with:
-          name: NAKIS_CIKTISI
+          name: JANOME_MB4_CIKTI
           path: |
-            ozel_tasarim.dst
-            ozel_tasarim.jef
+            nakis_final.dst
+            nakis_final.jef
