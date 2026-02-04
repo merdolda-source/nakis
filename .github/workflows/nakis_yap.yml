@@ -1,4 +1,4 @@
-name: Janome MB4 Uretim - Modern PIVAZ
+name: Janome MB4 Uretim - Text Engine
 
 on:
   push:
@@ -9,134 +9,190 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
+    # BURAYI DEĞİŞTİREREK İSTEDİĞİN YAZI VE ÖLÇÜLERİ VERİYORSUN
+    env:
+      MB4_TEXT: "PIVAZ"          # İSTEDİĞİN YAZI
+      MB4_WIDTH_MM: "120"        # TOPLAM GENİŞLİK (mm)
+      MB4_HEIGHT_MM: "70"        # TOPLAM YÜKSEKLİK (mm)
+      MB4_STITCH_LIMIT: "98000"  # MB4 güvenli vuruş sınırı
+      MB4_FONT_PATH: "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+
     steps:
       - name: Kodlari Cek
         uses: actions/checkout@v4
 
-      - name: create_pivaz.py Olustur
+      - name: create_mb4_text.py Olustur
         run: |
-          cat << 'EOF' > create_pivaz.py
-          import math
-          import pyembroidery
+          cat << 'EOF' > create_mb4_text.py
+import math
+import os
 
-          STITCH_LIMIT = 99000  # Janome MB4 için güvenli üst sınır
+import pyembroidery
+from PIL import Image, ImageDraw, ImageFont
 
-          def mb4_kesin_cozum():
-              pattern = pyembroidery.EmbPattern()
-              total_stitches = 0
 
-              # Güvenli dikiş ekleme fonksiyonu (limit kontrolü ile)
-              def add_stitch(cmd, x, y):
-                  nonlocal total_stitches, pattern
-                  if total_stitches >= STITCH_LIMIT:
-                      return
-                  pattern.add_stitch_absolute(cmd, int(round(x)), int(round(y)))
-                  if cmd in (pyembroidery.STITCH, pyembroidery.JUMP, pyembroidery.TRIM):
-                      total_stitches += 1
+def create_mb4_text():
+    # 10 birim = 1mm kabulü (pyembroidery standart DEST/JEF ölçeği)
+    UNIT = 10
 
-              def doldur_cizgi(x1, y1, x2, y2,
-                               kolon_genislik=70,   # Kolon kalınlığı (nakış genişliği)
-                               aralik_uzunluk=18,   # Dikişler arası mesafe (hat boyunca) ~1.8mm
-                               aralik_genislik=10   # Paralel hatlar arası mesafe ~1mm
-                               ):
-                  """
-                  Verilen çizgiyi tek çizgi yerine kalın bir nakış kolonu
-                  gibi doldurur. (satin/tatami hissi)
-                  """
-                  dx = x2 - x1
-                  dy = y2 - y1
-                  uzunluk = math.hypot(dx, dy)
-                  if uzunluk == 0:
-                      return
+    text = os.getenv("MB4_TEXT", "PIVAZ")
+    width_mm = float(os.getenv("MB4_WIDTH_MM", "120"))
+    height_mm = float(os.getenv("MB4_HEIGHT_MM", "70"))
+    stitch_limit = int(os.getenv("MB4_STITCH_LIMIT", "98000"))
+    font_path = os.getenv(
+        "MB4_FONT_PATH",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    )
 
-                  # Çizgi boyunca birim vektörler
-                  nx = -dy / uzunluk  # Normale dik (kalınlık yönü)
-                  ny = dx / uzunluk
+    # -------- 1) METNİ GÖRSEL OLARAK HAZIRLA (PIL) --------
+    # Çalışma alanı (piksel)
+    img_w, img_h = 800, 400
+    img = Image.new("L", (img_w, img_h), 0)  # siyah arka plan
+    draw = ImageDraw.Draw(img)
 
-                  bas = -kolon_genislik / 2.0
-                  bit = kolon_genislik / 2.0
-                  offset = bas
-                  yon = 1  # Boustrophedon: bir satır ileri, bir satır geri
+    # Font
+    try:
+        font = ImageFont.truetype(font_path, size=int(img_h * 0.7))
+    except OSError:
+        # Font yoksa default font - yine de çalışsın
+        font = ImageFont.load_default()
 
-                  while offset <= bit and total_stitches < STITCH_LIMIT:
-                      # Bu offset için başlangıç ve bitiş noktası
-                      sx = x1 + nx * offset
-                      sy = y1 + ny * offset
-                      ex = x2 + nx * offset
-                      ey = y2 + ny * offset
+    # Yazı bbox’u
+    bbox = draw.textbbox((0, 0), text, font=font)
+    text_w = bbox[2] - bbox[0]
+    text_h = bbox[3] - bbox[1]
 
-                      adim_sayisi = max(int(uzunluk // aralik_uzunluk), 1)
+    # Ortalayarak çiz
+    x = (img_w - text_w) // 2 - bbox[0]
+    y = (img_h - text_h) // 2 - bbox[1]
+    draw.text((x, y), text, fill=255, font=font)
 
-                      if yon == 1:
-                          # Satırı baştan sona
-                          add_stitch(pyembroidery.JUMP, sx, sy)
-                          for i in range(1, adim_sayisi + 1):
-                              t = i / adim_sayisi
-                              x = sx + (ex - sx) * t
-                              y = sy + (ey - sy) * t
-                              add_stitch(pyembroidery.STITCH, x, y)
-                      else:
-                          # Bir sonraki satırı tersten (geri dönüş)
-                          add_stitch(pyembroidery.JUMP, ex, ey)
-                          for i in range(1, adim_sayisi + 1):
-                              t = i / adim_sayisi
-                              x = ex + (sx - ex) * t
-                              y = ey + (sy - ey) * t
-                              add_stitch(pyembroidery.STITCH, x, y)
+    # Asıl dolu alan bbox’u
+    bbox = img.getbbox()
+    if not bbox:
+        raise ValueError("Yazı boş çıktı, text ayarını kontrol et.")
+    left, top, right, bottom = bbox
+    text_w_px = right - left
+    text_h_px = bottom - top
 
-                      yon *= -1
-                      offset += aralik_genislik
+    # -------- 2) PİKSELDEN NAKIŞ ÖLÇEĞİNE SKALAMA --------
+    width_units = width_mm * UNIT
+    height_units = height_mm * UNIT
 
-              # ===== PIVAZ Tasarımı (120x70mm alan içinde merkezli) =====
-              # P
-              doldur_cizgi(-500,  300, -500, -300)
-              doldur_cizgi(-500, -300, -300, -300)
-              doldur_cizgi(-300, -300, -300,    0)
-              doldur_cizgi(-300,    0, -500,    0)
+    # En-boy oranını koruyarak ölçekle
+    scale_x = width_units / float(text_w_px)
+    scale_y = height_units / float(text_h_px)
+    scale = min(scale_x, scale_y)
 
-              # I
-              doldur_cizgi(-200,  300, -200, -300)
+    # Görüntü merkezi (piksel)
+    cx_px = (left + right) / 2.0
+    cy_px = (top + bottom) / 2.0
 
-              # V
-              doldur_cizgi(-100, -300,    0,  300)
-              doldur_cizgi(   0,  300,  100, -300)
+    # Bir piksel kaç mm ediyor?
+    mm_per_px = scale / UNIT
 
-              # A
-              doldur_cizgi( 200,  300,  350, -300)
-              doldur_cizgi( 350, -300,  500,  300)
-              doldur_cizgi( 275,    0,  425,    0)
+    # Satırlar arası yaklaşık 1mm
+    row_step_px = max(1, int(round(1.0 / mm_per_px)))
+    # Satır içi dikiş mesafesi ~1.8mm
+    stitch_step_px = max(1, int(round(1.8 / mm_per_px)))
 
-              # Z
-              doldur_cizgi( 600, -300,  800, -300)
-              doldur_cizgi( 800, -300,  600,  300)
-              doldur_cizgi( 600,  300,  800,  300)
+    # -------- 3) NAKIŞ PATTERN OLUŞTUR (TATAMİ DOLGU) --------
+    pattern = pyembroidery.EmbPattern()
+    total_stitches = 0
 
-              # Normalize (merkeze al, yönleri düzelt)
-              pattern = pattern.get_normalized_pattern()
+    def add_stitch(cmd, x_units, y_units):
+        nonlocal total_stitches
+        if total_stitches >= stitch_limit:
+            return
+        pattern.add_stitch_absolute(
+            cmd,
+            int(round(x_units)),
+            int(round(y_units)),
+        )
+        if cmd in (pyembroidery.STITCH, pyembroidery.JUMP, pyembroidery.TRIM):
+            total_stitches += 1
 
-              pyembroidery.write(pattern, "pivaz_cikti.dst")
-              pyembroidery.write(pattern, "pivaz_cikti.jef")
-              print("Dosyalar uretildi. Toplam dikiş sayisi ~", total_stitches)
+    pixels = img.load()
 
-          if __name__ == "__main__":
-              mb4_kesin_cozum()
-          EOF
+    # Yatay satırlar halinde ilerliyoruz, her satırda dolu (beyaz) segmentleri bulup dolduruyoruz.
+    # Satırlar arasında JUMP kullanıldığı için büyük çapraz çizgiler oluşmaz.
+    for y_px in range(top, bottom + 1, row_step_px):
+        inside_segment = False
+        seg_start = None
+
+        for x_px in range(left, right + 1):
+            val = pixels[x_px, y_px]
+
+            if not inside_segment and val >= 128:
+                # Beyaz piksele girdik -> segment başı
+                inside_segment = True
+                seg_start = x_px
+            elif inside_segment and val < 128:
+                # Segment bitti
+                inside_segment = False
+                seg_end = x_px - 1
+
+                start_px = seg_start
+                end_px = seg_end
+                y_units = (y_px - cy_px) * scale
+
+                # Bu segment için önce JUMP ile başa git
+                x0_units = (start_px - cx_px) * scale
+                add_stitch(pyembroidery.JUMP, x0_units, y_units)
+
+                # Sonra satır boyu STITCH ile doldur
+                for xx in range(start_px, end_px + 1, stitch_step_px):
+                    x_units = (xx - cx_px) * scale
+                    add_stitch(pyembroidery.STITCH, x_units, y_units)
+
+        # Eğer satır sonunda hâlâ segment içindeysek onu da kapat
+        if inside_segment:
+            seg_end = right
+            start_px = seg_start
+            end_px = seg_end
+            y_units = (y_px - cy_px) * scale
+
+            x0_units = (start_px - cx_px) * scale
+            add_stitch(pyembroidery.JUMP, x0_units, y_units)
+
+            for xx in range(start_px, end_px + 1, stitch_step_px):
+                x_units = (xx - cx_px) * scale
+                add_stitch(pyembroidery.STITCH, x_units, y_units)
+
+    # Merkeze normalize et
+    pattern = pattern.get_normalized_pattern()
+    pattern.end()
+
+    pyembroidery.write(pattern, "mb4_text.dst")
+    pyembroidery.write(pattern, "mb4_text.jef")
+
+    print("Nakış dosyaları üretildi.")
+    print("Metin:", text)
+    print("Tahmini dikiş sayısı:", total_stitches)
+
+
+if __name__ == "__main__":
+    create_mb4_text()
+EOF
 
       - name: Python Hazirla
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      - name: Kütüphane Kur
-        run: pip install pyembroidery
+      - name: Kutuphaneleri Kur
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y fonts-dejavu-core
+          pip install pyembroidery pillow
 
-      - name: Dosyalari Uret
-        run: python create_pivaz.py
+      - name: Nakis Dosyalarini Uret
+        run: python create_mb4_text.py
 
       - name: Dosyalari Yukle
         uses: actions/upload-artifact@v4
         with:
-          name: JANOME_MB4_FINAL
+          name: JANOME_MB4_TEXT
           path: |
-            pivaz_cikti.dst
-            pivaz_cikti.jef
+            mb4_text.dst
+            mb4_text.jef
