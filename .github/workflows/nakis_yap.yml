@@ -8,13 +8,11 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-
-    # BURAYI DEĞİŞTİREREK İSTEDİĞİN YAZI VE ÖLÇÜLERİ VERİYORSUN
     env:
-      MB4_TEXT: "PIVAZ"          # İSTEDİĞİN YAZI
-      MB4_WIDTH_MM: "120"        # TOPLAM GENİŞLİK (mm)
-      MB4_HEIGHT_MM: "70"        # TOPLAM YÜKSEKLİK (mm)
-      MB4_STITCH_LIMIT: "98000"  # MB4 güvenli vuruş sınırı
+      MB4_TEXT: "PIVAZ"           # İstediğin yazı
+      MB4_WIDTH_MM: "120"         # Toplam genişlik (mm)
+      MB4_HEIGHT_MM: "70"         # Toplam yükseklik (mm)
+      MB4_STITCH_LIMIT: "98000"   # Dikiş limiti
       MB4_FONT_PATH: "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 
     steps:
@@ -24,156 +22,135 @@ jobs:
       - name: create_mb4_text.py Olustur
         run: |
           cat << 'EOF' > create_mb4_text.py
-import math
-import os
+          import math
+          import os
 
-import pyembroidery
-from PIL import Image, ImageDraw, ImageFont
-
-
-def create_mb4_text():
-    # 10 birim = 1mm kabulü (pyembroidery standart DEST/JEF ölçeği)
-    UNIT = 10
-
-    text = os.getenv("MB4_TEXT", "PIVAZ")
-    width_mm = float(os.getenv("MB4_WIDTH_MM", "120"))
-    height_mm = float(os.getenv("MB4_HEIGHT_MM", "70"))
-    stitch_limit = int(os.getenv("MB4_STITCH_LIMIT", "98000"))
-    font_path = os.getenv(
-        "MB4_FONT_PATH",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-    )
-
-    # -------- 1) METNİ GÖRSEL OLARAK HAZIRLA (PIL) --------
-    # Çalışma alanı (piksel)
-    img_w, img_h = 800, 400
-    img = Image.new("L", (img_w, img_h), 0)  # siyah arka plan
-    draw = ImageDraw.Draw(img)
-
-    # Font
-    try:
-        font = ImageFont.truetype(font_path, size=int(img_h * 0.7))
-    except OSError:
-        # Font yoksa default font - yine de çalışsın
-        font = ImageFont.load_default()
-
-    # Yazı bbox’u
-    bbox = draw.textbbox((0, 0), text, font=font)
-    text_w = bbox[2] - bbox[0]
-    text_h = bbox[3] - bbox[1]
-
-    # Ortalayarak çiz
-    x = (img_w - text_w) // 2 - bbox[0]
-    y = (img_h - text_h) // 2 - bbox[1]
-    draw.text((x, y), text, fill=255, font=font)
-
-    # Asıl dolu alan bbox’u
-    bbox = img.getbbox()
-    if not bbox:
-        raise ValueError("Yazı boş çıktı, text ayarını kontrol et.")
-    left, top, right, bottom = bbox
-    text_w_px = right - left
-    text_h_px = bottom - top
-
-    # -------- 2) PİKSELDEN NAKIŞ ÖLÇEĞİNE SKALAMA --------
-    width_units = width_mm * UNIT
-    height_units = height_mm * UNIT
-
-    # En-boy oranını koruyarak ölçekle
-    scale_x = width_units / float(text_w_px)
-    scale_y = height_units / float(text_h_px)
-    scale = min(scale_x, scale_y)
-
-    # Görüntü merkezi (piksel)
-    cx_px = (left + right) / 2.0
-    cy_px = (top + bottom) / 2.0
-
-    # Bir piksel kaç mm ediyor?
-    mm_per_px = scale / UNIT
-
-    # Satırlar arası yaklaşık 1mm
-    row_step_px = max(1, int(round(1.0 / mm_per_px)))
-    # Satır içi dikiş mesafesi ~1.8mm
-    stitch_step_px = max(1, int(round(1.8 / mm_per_px)))
-
-    # -------- 3) NAKIŞ PATTERN OLUŞTUR (TATAMİ DOLGU) --------
-    pattern = pyembroidery.EmbPattern()
-    total_stitches = 0
-
-    def add_stitch(cmd, x_units, y_units):
-        nonlocal total_stitches
-        if total_stitches >= stitch_limit:
-            return
-        pattern.add_stitch_absolute(
-            cmd,
-            int(round(x_units)),
-            int(round(y_units)),
-        )
-        if cmd in (pyembroidery.STITCH, pyembroidery.JUMP, pyembroidery.TRIM):
-            total_stitches += 1
-
-    pixels = img.load()
-
-    # Yatay satırlar halinde ilerliyoruz, her satırda dolu (beyaz) segmentleri bulup dolduruyoruz.
-    # Satırlar arasında JUMP kullanıldığı için büyük çapraz çizgiler oluşmaz.
-    for y_px in range(top, bottom + 1, row_step_px):
-        inside_segment = False
-        seg_start = None
-
-        for x_px in range(left, right + 1):
-            val = pixels[x_px, y_px]
-
-            if not inside_segment and val >= 128:
-                # Beyaz piksele girdik -> segment başı
-                inside_segment = True
-                seg_start = x_px
-            elif inside_segment and val < 128:
-                # Segment bitti
-                inside_segment = False
-                seg_end = x_px - 1
-
-                start_px = seg_start
-                end_px = seg_end
-                y_units = (y_px - cy_px) * scale
-
-                # Bu segment için önce JUMP ile başa git
-                x0_units = (start_px - cx_px) * scale
-                add_stitch(pyembroidery.JUMP, x0_units, y_units)
-
-                # Sonra satır boyu STITCH ile doldur
-                for xx in range(start_px, end_px + 1, stitch_step_px):
-                    x_units = (xx - cx_px) * scale
-                    add_stitch(pyembroidery.STITCH, x_units, y_units)
-
-        # Eğer satır sonunda hâlâ segment içindeysek onu da kapat
-        if inside_segment:
-            seg_end = right
-            start_px = seg_start
-            end_px = seg_end
-            y_units = (y_px - cy_px) * scale
-
-            x0_units = (start_px - cx_px) * scale
-            add_stitch(pyembroidery.JUMP, x0_units, y_units)
-
-            for xx in range(start_px, end_px + 1, stitch_step_px):
-                x_units = (xx - cx_px) * scale
-                add_stitch(pyembroidery.STITCH, x_units, y_units)
-
-    # Merkeze normalize et
-    pattern = pattern.get_normalized_pattern()
-    pattern.end()
-
-    pyembroidery.write(pattern, "mb4_text.dst")
-    pyembroidery.write(pattern, "mb4_text.jef")
-
-    print("Nakış dosyaları üretildi.")
-    print("Metin:", text)
-    print("Tahmini dikiş sayısı:", total_stitches)
+          import pyembroidery
+          from PIL import Image, ImageDraw, ImageFont
 
 
-if __name__ == "__main__":
-    create_mb4_text()
-EOF
+          def create_mb4_text():
+              UNIT = 10  # 10 birim = 1mm
+
+              text = os.getenv("MB4_TEXT", "PIVAZ")
+              width_mm = float(os.getenv("MB4_WIDTH_MM", "120"))
+              height_mm = float(os.getenv("MB4_HEIGHT_MM", "70"))
+              stitch_limit = int(os.getenv("MB4_STITCH_LIMIT", "98000"))
+              font_path = os.getenv(
+                  "MB4_FONT_PATH",
+                  "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+              )
+
+              # 1) Yazıyı resim olarak çiz
+              img_w, img_h = 800, 400
+              img = Image.new("L", (img_w, img_h), 0)
+              draw = ImageDraw.Draw(img)
+
+              try:
+                  font = ImageFont.truetype(font_path, size=int(img_h * 0.7))
+              except OSError:
+                  font = ImageFont.load_default()
+
+              bbox = draw.textbbox((0, 0), text, font=font)
+              text_w = bbox[2] - bbox[0]
+              text_h = bbox[3] - bbox[1]
+
+              x = (img_w - text_w) // 2 - bbox[0]
+              y = (img_h - text_h) // 2 - bbox[1]
+              draw.text((x, y), text, fill=255, font=font)
+
+              bbox = img.getbbox()
+              if not bbox:
+                  raise ValueError("Yazı boş çıktı.")
+              left, top, right, bottom = bbox
+              text_w_px = right - left
+              text_h_px = bottom - top
+
+              # 2) Piksel -> nakış ölçeği
+              width_units = width_mm * UNIT
+              height_units = height_mm * UNIT
+
+              scale_x = width_units / float(text_w_px)
+              scale_y = height_units / float(text_h_px)
+              scale = min(scale_x, scale_y)
+
+              cx_px = (left + right) / 2.0
+              cy_px = (top + bottom) / 2.0
+
+              mm_per_px = scale / UNIT
+
+              row_step_px = max(1, int(round(1.0 / mm_per_px)))   # ~1mm satır arası
+              stitch_step_px = max(1, int(round(1.8 / mm_per_px)))  # ~1.8mm aralık
+
+              # 3) Tatami dolgu
+              pattern = pyembroidery.EmbPattern()
+              total_stitches = 0
+
+              def add_stitch(cmd, x_units, y_units):
+                  nonlocal total_stitches
+                  if total_stitches >= stitch_limit:
+                      return
+                  pattern.add_stitch_absolute(
+                      cmd,
+                      int(round(x_units)),
+                      int(round(y_units)),
+                  )
+                  if cmd in (pyembroidery.STITCH, pyembroidery.JUMP, pyembroidery.TRIM):
+                      total_stitches += 1
+
+              pixels = img.load()
+
+              for y_px in range(top, bottom + 1, row_step_px):
+                  inside_segment = False
+                  seg_start = None
+
+                  for x_px in range(left, right + 1):
+                      val = pixels[x_px, y_px]
+
+                      if not inside_segment and val >= 128:
+                          inside_segment = True
+                          seg_start = x_px
+                      elif inside_segment and val < 128:
+                          inside_segment = False
+                          seg_end = x_px - 1
+
+                          start_px = seg_start
+                          end_px = seg_end
+                          y_units = (y_px - cy_px) * scale
+
+                          x0_units = (start_px - cx_px) * scale
+                          add_stitch(pyembroidery.JUMP, x0_units, y_units)
+
+                          for xx in range(start_px, end_px + 1, stitch_step_px):
+                              x_units = (xx - cx_px) * scale
+                              add_stitch(pyembroidery.STITCH, x_units, y_units)
+
+                  if inside_segment:
+                      seg_end = right
+                      start_px = seg_start
+                      end_px = seg_end
+                      y_units = (y_px - cy_px) * scale
+
+                      x0_units = (start_px - cx_px) * scale
+                      add_stitch(pyembroidery.JUMP, x0_units, y_units)
+
+                      for xx in range(start_px, end_px + 1, stitch_step_px):
+                          x_units = (xx - cx_px) * scale
+                          add_stitch(pyembroidery.STITCH, x_units, y_units)
+
+              pattern = pattern.get_normalized_pattern()
+              pattern.end()
+
+              pyembroidery.write(pattern, "mb4_text.dst")
+              pyembroidery.write(pattern, "mb4_text.jef")
+
+              print("Metin:", text)
+              print("Toplam dikiş:", total_stitches)
+
+
+          if __name__ == "__main__":
+              create_mb4_text()
+          EOF
 
       - name: Python Hazirla
         uses: actions/setup-python@v5
