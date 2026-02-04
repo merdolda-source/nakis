@@ -1,71 +1,76 @@
 import pyembroidery
-from PIL import Image, ImageFont, ImageDraw
-import numpy as np
 
-def profesyonel_nakis_sistemi(metin, font_yolu, font_boyutu=100, siklik=4):
-    pattern = pyembroidery.EmbPattern()
+def create_satin_stitch(pattern, x1, y1, x2, y2, width=30):
+    """
+    Basit bir çizgiyi saten dolguya (zigzag) dönüştürür.
+    width: Harf kalınlığı (10 birim = 1mm)
+    """
+    import math
     
-    # 1. Font Yükleme
-    try:
-        font = ImageFont.truetype(font_yolu, font_boyutu)
-    except:
-        font = ImageFont.load_default()
-
-    # 2. Metni Analiz Et (Hassas Render)
-    dummy_img = Image.new('L', (1, 1))
-    draw = ImageDraw.Draw(dummy_img)
-    bbox = draw.textbbox((0, 0), metin, font=font)
-    w, h = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    # Çizginin açısını hesapla
+    angle = math.atan2(y2 - y1, x2 - x1)
+    # Dik açıyı bul (Saten dikiş için sağa sola kayma)
+    perp_angle = angle + math.pi / 2
     
-    img = Image.new('L', (w + 40, h + 40), 0)
-    draw = ImageDraw.Draw(img)
-    draw.text((20, 20), metin, font=font, fill=255)
+    dx = math.cos(perp_angle) * width
+    dy = math.sin(perp_angle) * width
     
-    data = np.array(img)
-    yukseklik, genislik = data.shape
-
-    # 3. Akıllı Segment Tarama (Boğulmayı önleyen kısım)
-    for x in range(0, genislik, siklik):
-        sutun = data[:, x]
-        # Sütundaki dolu piksellerin gruplarını bul (Örn: 'P' harfinde üst ve alt iki ayrı parça)
-        dolu_indisler = np.where(sutun > 128)[0]
+    distance = math.sqrt((x2 - x1)**2 + (y2 - y1)**2)
+    steps = int(distance // 10)  # Her 1mm'de bir iğne vuruşu (Yüksek kalite)
+    
+    for i in range(steps + 1):
+        ratio = i / steps
+        curr_x = x1 + (x2 - x1) * ratio
+        curr_y = y1 + (y2 - y1) * ratio
         
-        if len(dolu_indisler) > 0:
-            # Kesintisiz blokları bul (Harf boşluklarını korumak için)
-            gruplar = np.split(dolu_indisler, np.where(np.diff(dolu_indisler) > 1)[0] + 1)
-            
-            for grup in gruplar:
-                if len(grup) < 2: continue # Çok küçük noktaları dikme (temiz görünüm)
-                
-                ust = grup[0]
-                alt = grup[-1]
-                
-                # Koordinat Dönüşümü (Janome MB-4 için)
-                nx = (x - genislik / 2) * 10
-                ny_ust = (ust - yukseklik / 2) * 10
-                ny_alt = (alt - yukseklik / 2) * 10
-                
-                # Her yeni parça başlangıcında JUMP yap (Boğulmayı ve ip karışıklığını önler)
-                pattern.add_stitch_absolute(pyembroidery.JUMP, int(nx), int(ny_ust))
-                
-                # Zigzag Dolgu (Satin benzeri yapı)
-                pattern.add_stitch_absolute(pyembroidery.STITCH, int(nx), int(ny_ust))
-                pattern.add_stitch_absolute(pyembroidery.STITCH, int(nx + 2), int(ny_alt)) # Hafif eğim netlik kazandırır
+        # Zigzag hareketleri
+        if i % 2 == 0:
+            pattern.add_stitch_absolute(pyembroidery.STITCH, int(curr_x + dx), int(curr_y + dy))
+        else:
+            pattern.add_stitch_absolute(pyembroidery.STITCH, int(curr_x - dx), int(curr_y - dy))
 
-    # 4. Temizlik ve Kayıt
-    pattern = pattern.get_normalized_pattern()
+def mb4_modern_pivaz():
+    pattern = pyembroidery.EmbPattern()
+    w = 40  # Harf kalınlığı (4mm)
+
+    # P Harfi
+    pattern.add_stitch_absolute(pyembroidery.JUMP, -500, 300)
+    create_satin_stitch(pattern, -500, 300, -500, -300, w)
+    create_satin_stitch(pattern, -500, -300, -300, -300, w)
+    create_satin_stitch(pattern, -300, -300, -300, 0, w)
+    create_satin_stitch(pattern, -300, 0, -500, 0, w)
+
+    # I Harfi
+    pattern.add_stitch_absolute(pyembroidery.JUMP, -200, 300)
+    create_satin_stitch(pattern, -200, 300, -200, -300, w)
+
+    # V Harfi
+    pattern.add_stitch_absolute(pyembroidery.JUMP, -100, -300)
+    create_satin_stitch(pattern, -100, -300, 0, 300, w)
+    create_satin_stitch(pattern, 0, 300, 100, -300, w)
+
+    # A Harfi
+    pattern.add_stitch_absolute(pyembroidery.JUMP, 200, 300)
+    create_satin_stitch(pattern, 200, 300, 350, -300, w)
+    create_satin_stitch(pattern, 350, -300, 500, 300, w)
+    # Orta çizgi
+    pattern.add_stitch_absolute(pyembroidery.JUMP, 275, 0)
+    create_satin_stitch(pattern, 275, 0, 425, 0, w)
+
+    # Z Harfi
+    pattern.add_stitch_absolute(pyembroidery.JUMP, 600, -300)
+    create_satin_stitch(pattern, 600, -300, 800, -300, w)
+    create_satin_stitch(pattern, 800, -300, 600, 300, w)
+    create_satin_stitch(pattern, 600, 300, 800, 300, w)
+
+    pattern.end()
     
-    # MB-4'ün tanıması için isim ve format
-    pyembroidery.write(pattern, "pivaz_modern.dst")
-    pyembroidery.write(pattern, "pivaz_modern.jef")
-    print(f"'{metin}' için temiz ve profesyonel nakış dosyası hazırlandı.")
+    # MB-4 uyumluluğu için normalize et
+    final_pattern = pattern.get_normalized_pattern()
+    
+    pyembroidery.write(final_pattern, "pivaz_modern.dst")
+    pyembroidery.write(final_pattern, "pivaz_modern.jef")
+    print("Modern Saten Nakis Dosyalari Uretildi.")
 
 if __name__ == "__main__":
-    # BURADAN AYARLARI YAPABİLİRSİN
-    PROFESYONEL_AYARLAR = {
-        "metin": "PIVAZ", 
-        "font_yolu": "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", # GitHub Linux yolu
-        "font_boyutu": 120, # Daha büyük harf = daha net sonuç
-        "siklik": 3        # 3-4 idealdir. 2 yaparsan çok sıkışır, boğulma yapar.
-    }
-    profesyonel_nakis_sistemi(**PROFESYONEL_AYARLAR)
+    mb4_modern_pivaz()
