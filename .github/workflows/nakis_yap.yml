@@ -1,4 +1,4 @@
-name: Janome MB4 Profesyonel Nakış Üretimi
+name: Janome MB4 Tam Otomatik Üretim
 
 on:
   push:
@@ -6,46 +6,50 @@ on:
   workflow_dispatch:
     inputs:
       metin:
-        description: 'Yazılacak Metin'
-        required: true
+        description: 'Nakış Yazısı'
+        required: false
         default: 'PIVAZ'
       boyut:
-        description: 'Font Boyutu (90-120 önerilir)'
-        required: true
-        default: '110'
+        description: 'Yazı Boyutu (80-120)'
+        required: false
+        default: '100'
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Kodları Çek
+      - name: Kodlari Cek
         uses: actions/checkout@v4
 
-      - name: Python Hazırla
+      - name: Python Hazirla
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      - name: Kütüphaneleri Kur
+      - name: Kutuphaneleri Kur
         run: pip install pyembroidery Pillow numpy
 
-      - name: Nakış Yazılımını Çalıştır
+      - name: Nakis Sistemini Calistir
         run: |
           cat <<EOF > create_embroidery.py
           import pyembroidery
           from PIL import Image, ImageFont, ImageDraw
           import numpy as np
 
-          def nakis_uret(metin, font_boyutu):
+          def nakis_uret(metin, boyut_str):
+              # Boş değer gelirse varsayılan ayarlar
+              metin = metin if metin else "PIVAZ"
+              boyut = int(boyut_str) if boyut_str else 100
+              
               pattern = pyembroidery.EmbPattern()
-              # Profesyonel Bold Font
               font_yolu = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+              
               try:
-                  font = ImageFont.truetype(font_yolu, font_boyutu)
+                  font = ImageFont.truetype(font_yolu, boyut)
               except:
                   font = ImageFont.load_default()
 
-              # 1. Metin Analizi (Yüksek Çözünürlük)
+              # 1. Metni Görsele Çiz
               dummy_img = Image.new('L', (1, 1))
               draw = ImageDraw.Draw(dummy_img)
               bbox = draw.textbbox((0, 0), metin, font=font)
@@ -59,57 +63,53 @@ jobs:
               data = np.array(img)
               yukseklik, genislik = data.shape
               
-              # 2. Nakış Ayarları
-              ADIM = 4          # Dikiş sıklığı (Boğulmayı önlemek için 4 idealdir)
-              KENAR_YALITIM = 2 # Harf kenarlarını temizlemek için
+              # 2. Dikiş Ayarları
+              ADIM = 4 # Dikiş sıklığı (Netlik için)
               
-              # 3. Akıllı Segment Tarama
+              # 3. Akıllı Tarama (Makine Dostu)
               for x in range(0, genislik, ADIM):
                   sutun = data[:, x]
                   dolu = np.where(sutun > 128)[0]
                   
                   if len(dolu) > 0:
-                      # Harf içindeki boşlukları (delikleri) ayır
                       gruplar = np.split(dolu, np.where(np.diff(dolu) > 2)[0] + 1)
                       
                       for grup in gruplar:
                           if len(grup) < 3: continue
-                          
                           ust, alt = grup[0], grup[-1]
+                          
                           nx = (x - genislik / 2) * 10
                           ny_ust = (ust - yukseklik / 2) * 10
                           ny_alt = (alt - yukseklik / 2) * 10
                           
-                          # KRİTİK: Her harf başlangıcında TRIM (İp Kesme) komutu
-                          # Eğer bir önceki sütun boşsa veya mesafe fazlaysa makineye DUR ve KES diyoruz
+                          # Yeni harfe geçerken makineye 'TRIM' (İp Kes) komutu ver
                           if x > 0 and len(np.where(data[:, x-ADIM] > 128)[0]) == 0:
                               pattern.add_stitch_absolute(pyembroidery.TRIM, int(nx), int(ny_ust))
                           
-                          # --- UNDERLAY (Zemin Desteği) ---
-                          # Harf kumaşa gömülmesin diye altına ince bir 'orta hat' dikişi
-                          pattern.add_stitch_absolute(pyembroidery.STITCH, int(nx), int((ny_ust + ny_alt)/2))
+                          # Underlay: Harf boğulmasın diye alta destek
+                          pattern.add_stitch_absolute(pyembroidery.STITCH, int(nx), int((ny_ust+ny_alt)/2))
                           
-                          # --- SATIN FILL (Sargı Dikiş) ---
-                          # Sağa ve sola çapraz vuruşlar yaparak gerçek nakış dokusu verir
+                          # Satin: Üste kaliteli sargı
                           pattern.add_stitch_absolute(pyembroidery.STITCH, int(nx), int(ny_ust))
-                          pattern.add_stitch_absolute(pyembroidery.STITCH, int(nx + ADIM/2), int(ny_alt))
+                          pattern.add_stitch_absolute(pyembroidery.STITCH, int(nx + (ADIM/2)), int(ny_alt))
                   
               pattern.add_command(pyembroidery.END)
               pattern = pattern.get_normalized_pattern()
-              
-              # Janome için en temiz çıktı DST formatıdır, JEF'e makine kendi çevirir veya ikisini de kullan
               pyembroidery.write(pattern, "nakis_final.dst")
               pyembroidery.write(pattern, "nakis_final.jef")
 
           if __name__ == "__main__":
-              nakis_uret("${{ github.event.inputs.metin }}", int("${{ github.event.inputs.boyut }}"))
+              # GitHub inputlarını güvenli bir şekilde oku
+              m = "${{ github.event.inputs.metin }}"
+              b = "${{ github.event.inputs.boyut }}"
+              nakis_uret(m, b)
           EOF
           python create_embroidery.py
 
-      - name: Dosyaları Hazırla
+      - name: Dosyalari Yukle
         uses: actions/upload-artifact@v4
         with:
-          name: JANOME_MB4_KARTUS
+          name: JANOME_MB4_CIKTI
           path: |
             nakis_final.dst
             nakis_final.jef
