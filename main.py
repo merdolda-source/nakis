@@ -4,7 +4,7 @@
 PNG → Nakış (DST/JEF) – Renkli, dolgu + kontur, tie-in/out, renk değişimi
 
 Gerekenler:
-  pip install pyembroidery pillow numpy opencv-python-headless matplotlib
+    pip install pyembroidery pillow numpy opencv-python-headless matplotlib
 
 Özellikler:
 - En fazla 3 rengi k-means ile otomatik algılar; en parlak kümeyi arka plan sayar.
@@ -35,6 +35,23 @@ THREAD_PALETTE = [
     ("Yellow",  (230, 200, 0)),
     ("White",   (255, 255, 255)),
 ]
+
+
+def set_thread_color(thread: pyembroidery.EmbThread, rgb):
+    """pyembroidery sürümleri için renk ataması (compat)."""
+    r, g, b = rgb
+    if hasattr(thread, "set_color"):
+        try:
+            thread.set_color(r, g, b)
+            return
+        except Exception:
+            pass
+    # Doğrudan alanlara yaz
+    thread.red = r
+    thread.green = g
+    thread.blue = b
+    # 0xRRGGBB
+    thread.color = (int(r) << 16) | (int(g) << 8) | int(b)
 
 
 class LogoNakis:
@@ -229,7 +246,6 @@ class LogoNakis:
             print("⚠️ Dikiş atılacak renk bulunamadı.")
             return
 
-        # Birleşik maske için bbox
         combined = np.zeros_like(color_masks[0][1], dtype=np.uint8)
         for _, mk, _ in color_masks:
             combined |= (mk > 0).astype(np.uint8)
@@ -253,11 +269,11 @@ class LogoNakis:
         stitch_step_emb = max(1, stitch_step_mm * 10)
         hatch_step_px = max(1, int(round(hatch_step_mm * 10 / scale)))
 
-        # Thread paletini ekle (kadar)
+        # İplikleri ekle
         for i in range(min(len(THREAD_PALETTE), len(color_masks))):
             name, rgb_t = THREAD_PALETTE[i]
             th = pyembroidery.EmbThread()
-            th.color = pyembroidery.color_to_hex(rgb_t[0], rgb_t[1], rgb_t[2])
+            set_thread_color(th, rgb_t)
             th.description = name
             th.catalog_number = name
             self.pattern.add_thread(th)
