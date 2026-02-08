@@ -671,12 +671,12 @@ if __name__ == '__main__':
     #  AYARLAR
     # ═══════════════════════════════════════════════════════════════
     
-    ISIM  = "Mehmet Öz 2025"
+    ISIM  = "SELMSN"
     BIRIM = "cm"              # "cm" veya "mm"
     
     # Alan ayarları
     GENISLIK = 15             # Toplam genişlik (cm veya mm)
-    YUKSEKLIK = 3             # Toplam yükseklik (cm veya mm)
+    YUKSEKLIK = 7             # Toplam yükseklik (cm veya mm)
     
     # Harf aralığı ayarı
     HARF_ARALIGI = 0.5        # Harfler arası mesafe (cm veya mm)
