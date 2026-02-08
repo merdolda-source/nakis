@@ -596,8 +596,8 @@ if __name__ == '__main__':
     
     # Seçenek 2: Genişlik ve yükseklik ver (yeni yöntem)
     # Yazı bu alana sığacak şekilde otomatik ölçeklenir
-    GENISLIK = 40   # cm (veya mm, BIRIM'e göre)
-    YUKSEKLIK = 15   # cm (veya mm, BIRIM'e göre)
+    GENISLIK = 36   # cm (veya mm, BIRIM'e göre)
+    YUKSEKLIK = 25   # cm (veya mm, BIRIM'e göre)
     
     m.isim_yaz(ISIM, 0, 0, genislik=GENISLIK, yukseklik=YUKSEKLIK, birim=BIRIM)
     # ──────────────────────────────────────────────────────────────
