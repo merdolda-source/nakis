@@ -2,16 +2,10 @@
 # -*- coding: utf-8 -*-
 """
 PNG → Nakış (DST/JEF) – Renkli, dolgu + kontur, tie-in/out, renk değişimi
+Siyah veya çok koyu tonları atla (ignore_black).
 
 Gerekenler:
     pip install pyembroidery pillow numpy opencv-python-headless matplotlib
-
-Özellikler:
-- En fazla 3 rengi k-means ile otomatik algılar; en parlak kümeyi arka plan sayar.
-- Her renk için: dolgu (hatch, running stitch) + kontur (running stitch)
-- Tie-in / tie-out kilit dikişleri, TRIM ve COLOR_CHANGE komutları
-- Alanı (genişlik x yükseklik) otomatik sığdırır, ortalar
-- Çıktılar: .dst, .jef, .jpg önizleme
 """
 
 import math
@@ -26,7 +20,7 @@ except ImportError as e:
     raise ImportError("OpenCV yok. Kurun: pip install opencv-python-headless") from e
 
 
-# Basit iplik paleti (RGB)
+# Basit iplik paleti (RGB) – İsterseniz özelleştirin
 THREAD_PALETTE = [
     ("Black",   (0, 0, 0)),
     ("Red",     (200, 0, 0)),
@@ -46,11 +40,9 @@ def set_thread_color(thread: pyembroidery.EmbThread, rgb):
             return
         except Exception:
             pass
-    # Doğrudan alanlara yaz
     thread.red = r
     thread.green = g
     thread.blue = b
-    # 0xRRGGBB
     thread.color = (int(r) << 16) | (int(g) << 8) | int(b)
 
 
@@ -183,8 +175,12 @@ class LogoNakis:
                 total += len(pts)
         return total
 
-    # ---------- renk kümelemesi ----------
-    def _segment_colors(self, img_rgb, k):
+    # ---------- renk kümelemesi + siyahı atla ----------
+    def _segment_colors(self, img_rgb, k, ignore_black=True, black_thresh=40, bg_mode="darkest"):
+        """
+        ignore_black: True ise ortalama RGB <= black_thresh olan kümeler atlanır.
+        bg_mode: 'darkest' (varsayılan) ya da 'brightest' – arka plan seçim yöntemi.
+        """
         h, w, _ = img_rgb.shape
         data = img_rgb.reshape((-1, 3)).astype(np.float32)
         criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 20, 1.0)
@@ -192,14 +188,40 @@ class LogoNakis:
         _, labels, centers = cv2.kmeans(data, K, None, criteria, 4, cv2.KMEANS_PP_CENTERS)
         labels = labels.reshape((h, w))
         centers = centers.astype(np.uint8)
-        bg_idx = int(np.argmax(centers.sum(axis=1)))  # en parlak arka plan
+
+        center_sum = centers.sum(axis=1)
+        center_mean = centers.mean(axis=1)
+
+        # Arka plan seçimi
+        cand_bg = None
+        if ignore_black:
+            black_idxs = [i for i, m in enumerate(center_mean) if m <= black_thresh]
+            if black_idxs:
+                # En koyu siyahı arka plan al
+                cand_bg = black_idxs[np.argmin(center_sum[black_idxs])]
+        if cand_bg is None:
+            if bg_mode == "brightest":
+                cand_bg = int(np.argmax(center_sum))
+            else:  # darkest
+                cand_bg = int(np.argmin(center_sum))
+        bg_idx = int(cand_bg)
+
+        # Sırala: büyük alandan küçüğe, bg en sona
         areas = []
         for i in range(K):
             area = int((labels == i).sum())
             areas.append((area, i))
         areas.sort(reverse=True)
         ordered = [i for _, i in areas if i != bg_idx] + [bg_idx]
-        return labels, centers, ordered, bg_idx
+
+        # Siyah sayılacak kümeler (atlanacak)
+        skip_set = set()
+        if ignore_black:
+            for i, m in enumerate(center_mean):
+                if m <= black_thresh:
+                    skip_set.add(i)
+
+        return labels, centers, ordered, bg_idx, skip_set
 
     # ---------- ana iş ----------
     def logo_isle(
@@ -218,6 +240,9 @@ class LogoNakis:
         stitch_step_mm=0.6,
         simplify_epsilon=0.4,
         min_contour_len=2,
+        ignore_black=True,
+        black_thresh=40,
+        bg_mode="darkest",
     ):
         # Birim → emb (0.1 mm)
         k = 100 if birim == "cm" else 10 if birim == "mm" else 100
@@ -229,16 +254,25 @@ class LogoNakis:
         img = Image.open(image_path).convert("RGB")
         rgb = np.array(img)
 
-        labels, centers, ordered, bg_idx = self._segment_colors(rgb, n_colors)
+        labels, centers, ordered, bg_idx, skip_set = self._segment_colors(
+            rgb, n_colors, ignore_black=ignore_black, black_thresh=black_thresh, bg_mode=bg_mode
+        )
         print(f"🎨 Bulunan küme sayısı: {len(centers)}, arka plan kümesi: {bg_idx}")
+        if skip_set:
+            print(f"⛔ Siyah/çok koyu atlanacak kümeler: {sorted(list(skip_set))} (eşik {black_thresh})")
 
         color_masks = []
         for idx in ordered:
             if idx == bg_idx:
+                print(f"⛔ Arka plan (küme {idx}) atlandı.")
+                continue
+            if idx in skip_set:
+                print(f"⛔ Küme {idx} siyah/koyu, atlandı.")
                 continue
             mask = (labels == idx).astype(np.uint8) * 255
             area = int(mask.sum() // 255)
             if area < min_area_px:
+                print(f"⛔ Küme {idx} alan küçük ({area}px), atlandı.")
                 continue
             color_masks.append((idx, mask, area))
 
@@ -266,10 +300,10 @@ class LogoNakis:
         print(f"📦 Hedef: {genislik} x {yukseklik} {birim}")
         print(f"🔧 Ölçek: {scale / k:.2f} {birim}")
 
-        stitch_step_emb = max(1, stitch_step_mm * 10)
+        stitch_step_emb = max(1, stitch_step_mm * 10)  # mm → 0.1 mm
         hatch_step_px = max(1, int(round(hatch_step_mm * 10 / scale)))
 
-        # İplikleri ekle
+        # İplikleri ekle (algılanan renk sayısı kadar)
         for i in range(min(len(THREAD_PALETTE), len(color_masks))):
             name, rgb_t = THREAD_PALETTE[i]
             th = pyembroidery.EmbThread()
@@ -283,7 +317,7 @@ class LogoNakis:
         for idx, mask, area in color_masks:
             col_rgb = centers[idx].tolist()
             name = THREAD_PALETTE[color_block % len(THREAD_PALETTE)][0]
-            print(f"🧵 Renk {color_block+1}: küme {idx}, alan {area}px, renk {col_rgb}, isim {name}")
+            print(f"🧵 Renk {color_block+1}: küme {idx}, alan {area}px, merkez renk {col_rgb}, iplik adı {name}")
 
             if color_block > 0:
                 self._color_change()
@@ -364,10 +398,10 @@ class LogoNakis:
 if __name__ == "__main__":
     m = LogoNakis()
 
-    LOGO_DOSYA   = "logo.png"
+    LOGO_DOSYA   = "logo.png"   # buraya kendi görselinizi koyun
     BIRIM        = "cm"
-    GENISLIK_CM  = 10
-    YUKSEKLIK_CM = 7
+    GENISLIK_CM  = 15
+    YUKSEKLIK_CM = 5
     BAS_X        = 0
     BAS_Y        = 0
 
@@ -375,10 +409,13 @@ if __name__ == "__main__":
     MIN_AREA_PX      = 50
     OUTLINE          = True
     FILL             = True
-    HATCH_STEP_MM    = 0.3
-    STITCH_STEP_MM   = 0.4
-    SIMPLIFY_EPS     = 0.2
+    HATCH_STEP_MM    = 0.7
+    STITCH_STEP_MM   = 0.6
+    SIMPLIFY_EPS     = 0.4
     MIN_CONTOUR_LEN  = 2
+    IGNORE_BLACK     = True   # siyah / çok koyu alanları atla
+    BLACK_THRESH     = 40     # 0-255, ortalama RGB eşiği
+    BG_MODE          = "darkest"  # 'darkest' veya 'brightest'
 
     m.logo_isle(
         image_path=LOGO_DOSYA,
@@ -395,6 +432,9 @@ if __name__ == "__main__":
         stitch_step_mm=STITCH_STEP_MM,
         simplify_epsilon=SIMPLIFY_EPS,
         min_contour_len=MIN_CONTOUR_LEN,
+        ignore_black=IGNORE_BLACK,
+        black_thresh=BLACK_THRESH,
+        bg_mode=BG_MODE,
     )
 
     m.kaydet("logo")
