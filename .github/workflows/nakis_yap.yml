@@ -1,4 +1,4 @@
-name: Janome MB4 Modern Uretim
+name: Janome MB4 Full Uretim
 on: [push, workflow_dispatch]
 
 jobs:
@@ -17,6 +17,7 @@ jobs:
         run: |
           pip install --upgrade pip
           pip install pyembroidery
+          pip install matplotlib
 
       - name: Tasarimi Olustur
         run: python main.py
@@ -28,3 +29,4 @@ jobs:
           path: |
             *.dst
             *.jef
+            *.jpg
