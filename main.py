@@ -2,11 +2,10 @@
 # -*- coding: utf-8 -*-
 """
 PNG → Nakış (DST/JEF) – Dolgu + kontur, renk değişimi
-- Siyahı / çok koyuyu atla
-- En büyük alanlı (arka plan) kümeyi atla
-- Çok büyük alanlı (alt tabaka) kümeyi atla (örn. max_area_fraction_skip=0.35)
-- TRIM yok, segmentler arası sadece JUMP, tie-in/out kısa
-- Dolgu taraması sıklaştırıldı
+- Arka plan ve çok büyük alanlı (alt tabaka) kümeler atlanır
+- Siyah (ve isterseniz beyaz) otomatik atlanır
+- TRIM yok, segmentler arası JUMP; kısa tie-in/out
+- Dolgu taraması sıklaştırılmış
 
 Gerekenler:
     pip install pyembroidery pillow numpy opencv-python-headless matplotlib
@@ -24,7 +23,7 @@ except ImportError as e:
     raise ImportError("OpenCV yok. Kurun: pip install opencv-python-headless") from e
 
 
-# Basit iplik paleti (RGB). Gerekirse düzenleyin.
+# Basit iplik paleti (RGB). Dilerseniz değiştirin.
 THREAD_PALETTE = [
     ("Gold",   (220, 180, 60)),
     ("White",  (255, 255, 255)),
@@ -38,16 +37,13 @@ THREAD_PALETTE = [
 
 def set_thread_color(thread: pyembroidery.EmbThread, rgb):
     r, g, b = rgb
-    if hasattr(thread, "set_color"):
-        try:
-            thread.set_color(r, g, b)
-            return
-        except Exception:
-            pass
-    thread.red = r
-    thread.green = g
-    thread.blue = b
-    thread.color = (int(r) << 16) | (int(g) << 8) | int(b)
+    try:
+        thread.set_color(r, g, b)
+    except Exception:
+        thread.red = r
+        thread.green = g
+        thread.blue = b
+        thread.color = (int(r) << 16) | (int(g) << 8) | int(b)
 
 
 class LogoNakis:
@@ -126,7 +122,7 @@ class LogoNakis:
             if len(pts_emb) < 2:
                 continue
 
-            # trimsiz: jump + tie + kontur, sonra direk jump
+            # trimsiz: jump + tie + kontur, sonra tie-out
             self._jump(*pts_emb[0])
             self._tie_in(pts_emb[0], step=3)
             for p in pts_emb[1:]:
@@ -177,14 +173,17 @@ class LogoNakis:
         return total
 
     # ---------- renk kümelemesi + arka plan/alt tabaka atlama ----------
-    def _segment_colors(self, img_rgb, k, ignore_black=True, black_thresh=40,
+    def _segment_colors(self, img_rgb, k,
+                        ignore_black=True, black_thresh=40,
+                        ignore_white=True, white_thresh=245,
                         bg_mode="auto", max_area_fraction_skip=0.35):
         """
         ignore_black: ortalama RGB <= black_thresh kümeleri atla.
-        bg_mode: 'auto' -> en büyük alanlı küme arka plan kabul,
+        ignore_white: ortalama RGB >= white_thresh kümeleri atla (beyaz zemin).
+        bg_mode: 'auto' -> en büyük alanlı küme arka plan,
                  'darkest' -> en koyu küme,
                  'brightest' -> en parlak küme.
-        max_area_fraction_skip: küme alanı toplamın bu oranından büyükse (örn. alt tabaka) atla.
+        max_area_fraction_skip: küme alanı toplamın bu oranından büyükse (alt tabaka) atla.
         """
         h, w, _ = img_rgb.shape
         data = img_rgb.reshape((-1, 3)).astype(np.float32)
@@ -195,26 +194,31 @@ class LogoNakis:
         centers = centers.astype(np.uint8)
 
         areas = [(int((labels == i).sum()), i) for i in range(K)]
-        areas_sorted = sorted(areas, reverse=True)  # büyükten küçüğe
+        areas_sorted = sorted(areas, reverse=True)
         total_px = h * w
 
-        # bg seçimi
+        # Arka plan seçimi
         if bg_mode == "auto":
-            bg_idx = areas_sorted[0][1]  # en büyük alan
+            bg_idx = areas_sorted[0][1]
         elif bg_mode == "brightest":
             bg_idx = int(np.argmax(centers.sum(axis=1)))
         else:  # darkest
             bg_idx = int(np.argmin(centers.sum(axis=1)))
 
-        # siyah / çok koyu kümeler
         center_mean = centers.mean(axis=1)
         skip_set = set()
+
         if ignore_black:
             for i, m in enumerate(center_mean):
                 if m <= black_thresh:
                     skip_set.add(i)
 
-        # çok büyük alanlı (alt tabaka) kümeleri atla
+        if ignore_white:
+            for i, m in enumerate(center_mean):
+                if m >= white_thresh:
+                    skip_set.add(i)
+
+        # Çok büyük alanlı (alt tabaka) kümeleri atla
         for area, idx in areas_sorted:
             frac = area / total_px
             if frac >= max_area_fraction_skip:
@@ -244,6 +248,8 @@ class LogoNakis:
         min_contour_len=2,
         ignore_black=True,
         black_thresh=40,
+        ignore_white=True,
+        white_thresh=245,
         bg_mode="auto",
         max_area_fraction_skip=0.35,  # alt tabakayı atmak için
     ):
@@ -262,13 +268,15 @@ class LogoNakis:
             n_colors,
             ignore_black=ignore_black,
             black_thresh=black_thresh,
+            ignore_white=ignore_white,
+            white_thresh=white_thresh,
             bg_mode=bg_mode,
             max_area_fraction_skip=max_area_fraction_skip,
         )
 
         print(f"🎨 Küme sayısı: {len(centers)}, arka plan: {bg_idx}")
         if skip_set:
-            print(f"⛔ Atlanacak kümeler: {sorted(list(skip_set))} (siyah/koyu veya çok büyük alan)")
+            print(f"⛔ Atlanacak kümeler: {sorted(list(skip_set))} (koyu/siyah, çok açık/beyaz veya çok büyük alan)")
 
         color_masks = []
         for idx in ordered:
@@ -308,7 +316,7 @@ class LogoNakis:
         print(f"🖼️ Logo: {image_path}")
         print(f"📦 Hedef: {genislik} x {yukseklik} {birim}")
         print(f"🔧 Ölçek: {scale / k:.2f} {birim}")
-        print(f"✂️ Trim YOK. Segmentler arası JUMP + tie-in/out kısa.")
+        print(f"✂️ Trim YOK. Segmentler arası JUMP + kısa tie-in/out.")
 
         stitch_step_emb = max(1, stitch_step_mm * 10)  # mm → 0.1 mm
         hatch_step_px = max(1, int(round(hatch_step_mm * 10 / scale)))
@@ -419,14 +427,17 @@ if __name__ == "__main__":
     MIN_AREA_PX           = 50
     OUTLINE               = True
     FILL                  = True
-    HATCH_STEP_MM         = 0.6   # dolgu satır aralığı
+    HATCH_STEP_MM         = 0.6   # dolgu satır aralığı (küçükse daha sık)
     STITCH_STEP_MM        = 0.5   # dikiş aralığı
     SIMPLIFY_EPS          = 0.35
     MIN_CONTOUR_LEN       = 2
+
     IGNORE_BLACK          = True
-    BLACK_THRESH          = 40
-    BG_MODE               = "auto"    # 'auto', 'darkest', 'brightest'
-    MAX_AREA_FRAC_SKIP    = 0.35      # %35'ten büyük kümeleri atla (alt tabaka engeli)
+    BLACK_THRESH          = 50    # 40–60 arası deneyebilirsiniz
+    IGNORE_WHITE          = True  # beyaz zemini atlamak için
+    WHITE_THRESH          = 245
+    BG_MODE               = "auto"   # 'auto', 'darkest', 'brightest'
+    MAX_AREA_FRAC_SKIP    = 0.35     # %35’ten büyük kümeleri atla (alt tabaka)
 
     m.logo_isle(
         image_path=LOGO_DOSYA,
@@ -445,6 +456,8 @@ if __name__ == "__main__":
         min_contour_len=MIN_CONTOUR_LEN,
         ignore_black=IGNORE_BLACK,
         black_thresh=BLACK_THRESH,
+        ignore_white=IGNORE_WHITE,
+        white_thresh=WHITE_THRESH,
         bg_mode=BG_MODE,
         max_area_fraction_skip=MAX_AREA_FRAC_SKIP,
     )
