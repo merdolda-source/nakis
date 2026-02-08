@@ -3,19 +3,15 @@
 """
 PNG → Nakış (DST/JEF) – Renkli, dolgu + kontur, tie-in/out, renk değişimi
 
-Özellikler
-- En fazla 3 rengi otomatik algılar (k-means). En parlak küme arka plan sayılır.
-- Her renk için:
-    * Dolgu: yatay hatch (running stitch), eşit aralıklı dikişler
-    * Kontur: running stitch
-    * Tie-in / tie-out kilit dikişleri
-    * COLOR_CHANGE komutu (renk blokları arasında)
-- Alana (genişlik x yükseklik) otomatik sığdırır, ortalar.
-- Çıktılar: .dst, .jef ve .jpg önizleme.
-- Kütüphaneler: pyembroidery, pillow, numpy, opencv-python-headless, matplotlib
+Gerekenler:
+  pip install pyembroidery pillow numpy opencv-python-headless matplotlib
 
-Kurulum:
-    pip install pyembroidery pillow numpy opencv-python-headless matplotlib
+Özellikler:
+- En fazla 3 rengi k-means ile otomatik algılar; en parlak kümeyi arka plan sayar.
+- Her renk için: dolgu (hatch, running stitch) + kontur (running stitch)
+- Tie-in / tie-out kilit dikişleri, TRIM ve COLOR_CHANGE komutları
+- Alanı (genişlik x yükseklik) otomatik sığdırır, ortalar
+- Çıktılar: .dst, .jef, .jpg önizleme
 """
 
 import math
@@ -30,15 +26,14 @@ except ImportError as e:
     raise ImportError("OpenCV yok. Kurun: pip install opencv-python-headless") from e
 
 
-# ------------------------------------------------------------
-# Renk paleti (DMC benzeri RGB) – ilk 6 tanesi
+# Basit iplik paleti (RGB)
 THREAD_PALETTE = [
-    ("Black",       (0, 0, 0)),
-    ("White",       (255, 255, 255)),
-    ("Red",         (200, 0, 0)),
-    ("Green",       (0, 150, 0)),
-    ("Blue",        (0, 70, 200)),
-    ("Yellow",      (230, 200, 0)),
+    ("Black",   (0, 0, 0)),
+    ("Red",     (200, 0, 0)),
+    ("Blue",    (0, 70, 200)),
+    ("Green",   (0, 150, 0)),
+    ("Yellow",  (230, 200, 0)),
+    ("White",   (255, 255, 255)),
 ]
 
 
@@ -47,9 +42,6 @@ class LogoNakis:
         self.pattern = pyembroidery.EmbPattern()
 
     # ---------- yardımcılar ----------
-    def _dist(self, a, b):
-        return math.hypot(a[0] - b[0], a[1] - b[1])
-
     def _resample(self, pts, step):
         if len(pts) < 2 or step <= 0:
             return pts
@@ -71,7 +63,7 @@ class LogoNakis:
                 x0, y0 = nx, ny
                 acc = 0.0
             acc += rem
-        if self._dist(out[-1], pts[-1]) > 1e-3:
+        if math.hypot(out[-1][0] - pts[-1][0], out[-1][1] - pts[-1][1]) > 1e-3:
             out.append(pts[-1])
         return out
 
@@ -87,12 +79,8 @@ class LogoNakis:
     def _color_change(self):
         self.pattern.add_command(pyembroidery.COLOR_CHANGE)
 
-    def _stop(self):
-        self.pattern.add_command(pyembroidery.STOP)
-
     # ---------- tie-in / tie-out ----------
     def _tie_in(self, pt, step=4):
-        # Küçük zikzak: ileri-geri 2-3 dikiş
         x, y = pt
         self._stitch(x, y)
         self._stitch(x + step, y)
@@ -187,9 +175,7 @@ class LogoNakis:
         _, labels, centers = cv2.kmeans(data, K, None, criteria, 4, cv2.KMEANS_PP_CENTERS)
         labels = labels.reshape((h, w))
         centers = centers.astype(np.uint8)
-        # Arka planı bul: en parlak merkez (R+G+B max)
-        bg_idx = int(np.argmax(centers.sum(axis=1)))
-        # Küme alanlarını sırala (büyükten küçüğe), bg en sona itilir
+        bg_idx = int(np.argmax(centers.sum(axis=1)))  # en parlak arka plan
         areas = []
         for i in range(K):
             area = int((labels == i).sum())
@@ -207,36 +193,32 @@ class LogoNakis:
         genislik=15,
         yukseklik=5,
         birim="cm",
-        n_colors=3,            # en fazla kaç renk
-        min_area_px=50,        # çok küçük parçaları yok say
+        n_colors=3,
+        min_area_px=50,
         outline=True,
         fill=True,
-        hatch_step_mm=0.7,     # dolgu satır aralığı
-        stitch_step_mm=0.6,    # dikiş aralığı
-        simplify_epsilon=0.4,  # kontur basitleştirme (piksel)
+        hatch_step_mm=0.7,
+        stitch_step_mm=0.6,
+        simplify_epsilon=0.4,
         min_contour_len=2,
     ):
-        # Birim → emb (0.1 mm grid)
+        # Birim → emb (0.1 mm)
         k = 100 if birim == "cm" else 10 if birim == "mm" else 100
         target_w = genislik * k
         target_h = yukseklik * k
         bx = baslangic_x * k
         by = baslangic_y * k
 
-        # Görüntü yükle (RGB)
         img = Image.open(image_path).convert("RGB")
         rgb = np.array(img)
-        h, w, _ = rgb.shape
 
-        # K-means renk segmentasyonu
         labels, centers, ordered, bg_idx = self._segment_colors(rgb, n_colors)
         print(f"🎨 Bulunan küme sayısı: {len(centers)}, arka plan kümesi: {bg_idx}")
 
-        # Her küme için maskeyi hazırla (bg hariç)
         color_masks = []
         for idx in ordered:
             if idx == bg_idx:
-                continue  # arka planı atla
+                continue
             mask = (labels == idx).astype(np.uint8) * 255
             area = int(mask.sum() // 255)
             if area < min_area_px:
@@ -247,20 +229,19 @@ class LogoNakis:
             print("⚠️ Dikiş atılacak renk bulunamadı.")
             return
 
-        # Tüm maskelerin birleşik bbox'u
-        all_pts = np.column_stack(np.nonzero(sum(m[1] for m in color_masks)))
-        if all_pts.size == 0:
-            print("⚠️ Hiç piksel yok.")
-            return
-        min_y, min_x = all_pts.min(axis=0)
-        max_y, max_x = all_pts.max(axis=0)
+        # Birleşik maske için bbox
+        combined = np.zeros_like(color_masks[0][1], dtype=np.uint8)
+        for _, mk, _ in color_masks:
+            combined |= (mk > 0).astype(np.uint8)
+        pts_y, pts_x = np.nonzero(combined)
+        min_x, max_x = pts_x.min(), pts_x.max()
+        min_y, max_y = pts_y.min(), pts_y.max()
         src_w = max_x - min_x
         src_h = max_y - min_y
         if src_w < 1 or src_h < 1:
             print("⚠️ Görüntü boyutu geçersiz.")
             return
 
-        # Ölçek ve ortalama
         scale = min(target_w / src_w, target_h / src_h)
         ox = bx + (target_w - src_w * scale) / 2.0
         oy = by + (target_h - src_h * scale) / 2.0
@@ -269,19 +250,19 @@ class LogoNakis:
         print(f"📦 Hedef: {genislik} x {yukseklik} {birim}")
         print(f"🔧 Ölçek: {scale / k:.2f} {birim}")
 
-        stitch_step_emb = max(1, stitch_step_mm * 10)  # 0.1 mm grid
+        stitch_step_emb = max(1, stitch_step_mm * 10)
         hatch_step_px = max(1, int(round(hatch_step_mm * 10 / scale)))
 
-        # Thread paleti ekle (ilk k adet)
+        # Thread paletini ekle (kadar)
         for i in range(min(len(THREAD_PALETTE), len(color_masks))):
             name, rgb_t = THREAD_PALETTE[i]
             th = pyembroidery.EmbThread()
-            th.set_name(name)
-            th.set_description(name)
-            th.set_color(pyembroidery.color_to_hex(rgb_t[0], rgb_t[1], rgb_t[2]))
+            th.color = pyembroidery.color_to_hex(rgb_t[0], rgb_t[1], rgb_t[2])
+            th.description = name
+            th.catalog_number = name
             self.pattern.add_thread(th)
 
-        # Renk bloklarını sırayla işle
+        # Renk blokları
         color_block = 0
         for idx, mask, area in color_masks:
             col_rgb = centers[idx].tolist()
@@ -291,10 +272,9 @@ class LogoNakis:
             if color_block > 0:
                 self._color_change()
 
-            # Konturlar (iç delikler dahil)
-            contours, hierarchy = cv2.findContours(mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+            contours, _ = cv2.findContours(mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
 
-            # Dolgu
+            n_fill = 0
             if fill:
                 n_fill = self._draw_hatch(
                     mask=mask,
@@ -308,10 +288,8 @@ class LogoNakis:
                     hatch_step_px=hatch_step_px,
                     stitch_step_emb=stitch_step_emb,
                 )
-            else:
-                n_fill = 0
 
-            # Kontur
+            n_out = 0
             if outline:
                 n_out = self._draw_outline(
                     contours=contours,
@@ -326,13 +304,10 @@ class LogoNakis:
                     simplify_eps=simplify_epsilon,
                     min_len=min_contour_len,
                 )
-            else:
-                n_out = 0
 
             print(f"   ➜ Dolgu dikiş: {n_fill}, Kontur dikiş: {n_out}")
             color_block += 1
 
-        # Bitir
         self.pattern.end()
 
     # ---------- önizleme ----------
@@ -380,9 +355,8 @@ if __name__ == "__main__":
     BAS_X        = 0
     BAS_Y        = 0
 
-    # Ayarlar
-    N_COLORS         = 3     # en fazla 3 renk
-    MIN_AREA_PX      = 50    # çok ufak parçaları alma
+    N_COLORS         = 3
+    MIN_AREA_PX      = 50
     OUTLINE          = True
     FILL             = True
     HATCH_STEP_MM    = 0.7
