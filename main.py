@@ -463,9 +463,9 @@ if __name__ == '__main__':
     m = ProfesyonelNakis()
 
     # ─── AYARLAR ──────────────────────────────────────────────────
-    ISIM  = "Mehmet Öz 2025"
+    ISIM  = "SELMAN"
     BOYUT = 2.5              # harf yüksekliği
-    BIRIM = "cm"             # "cm" veya "mm"
+    BIRIM = "mm"             # "cm" veya "mm"
     # ──────────────────────────────────────────────────────────────
 
     harf_say  = len(ISIM.replace(' ', ''))
