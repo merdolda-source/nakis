@@ -615,12 +615,11 @@ class ProfesyonelNakis:
 
 
 # ══════════════════════════════════════════════════════════════════
-#  KULLANI
-M
+#  KULLANIM
 # ══════════════════════════════════════════════════════════════════
 if __name__ == '__main__':
 
-    m = ProfesyonelNakis()
+    nakis = ProfesyonelNakis()
 
     # Yazacak metin
     ISIM  = "SELMAN"
@@ -638,7 +637,7 @@ if __name__ == '__main__':
     BOLD   = True
     ITALIC = False
     
-    m.isim_yaz(
+    nakis.isim_yaz(
         ISIM, 
         0, 0,
         genislik=GENISLIK,
@@ -650,4 +649,4 @@ if __name__ == '__main__':
         italic=ITALIC
     )
     
-    m.kaydet(ISIM)
+    nakis.kaydet(ISIM)
