@@ -10,7 +10,8 @@ class ProfesyonelNakis:
     def _mesafe(self, x1, y1, x2, y2):
         return math.sqrt((x2 - x1)**2 + (y2 - y1)**2)
 
-    def tam_sargi_yap(self, x1, y1, x2, y2, kalinlik_mm, ilk_segment=True):
+    def _sargi_dik(self, x1, y1, x2, y2, kalinlik_mm):
+        """Saf satin sargı - sadece STITCH üretir, JUMP/TRIM yok"""
         genislik = kalinlik_mm * 10
         dx = x2 - x1
         dy = y2 - y1
@@ -22,37 +23,6 @@ class ProfesyonelNakis:
         nx = -dy / dist * (genislik / 2)
         ny = dx / dist * (genislik / 2)
 
-        # Sadece harfin ilk segmentinde JUMP yap, diğerlerinde STITCH ile bağlan
-        if ilk_segment:
-            self.pattern.add_stitch_absolute(pyembroidery.JUMP, int(x1), int(y1))
-        else:
-            self.pattern.add_stitch_absolute(pyembroidery.STITCH, int(x1), int(y1))
-
-        # === 1. ALT DOLGU (UNDERLAY) - ZİGZAG ===
-        kucultme = 0.6
-        nx_alt = nx * kucultme
-        ny_alt = ny * kucultme
-        
-        steps_alt = int(dist // 20) + 1
-        for i in range(steps_alt + 1):
-            ratio = i / steps_alt
-            cx = x1 + dx * ratio
-            cy = y1 + dy * ratio
-            if i % 2 == 0:
-                self.pattern.add_stitch_absolute(pyembroidery.STITCH, int(cx + nx_alt), int(cy + ny_alt))
-            else:
-                self.pattern.add_stitch_absolute(pyembroidery.STITCH, int(cx - nx_alt), int(cy - ny_alt))
-        
-        # Geri dön
-        self.pattern.add_stitch_absolute(pyembroidery.STITCH, int(x2), int(y2))
-        steps_geri = int(dist // 25) + 1
-        for i in range(steps_geri + 1):
-            ratio = i / steps_geri
-            cx = x2 - dx * ratio
-            cy = y2 - dy * ratio
-            self.pattern.add_stitch_absolute(pyembroidery.STITCH, int(cx), int(cy))
-
-        # === 2. ANA SARGI (TOP SATIN) - Çok sıkı ===
         MAX_DIKIŞ = 70
         if genislik > MAX_DIKIŞ:
             ara_adim = int(math.ceil(genislik / MAX_DIKIŞ))
@@ -60,12 +30,12 @@ class ProfesyonelNakis:
             ara_adim = 1
 
         YOGUNLUK = 2
-        steps_sargi = int(dist // YOGUNLUK)
-        if steps_sargi < 2:
-            steps_sargi = 2
+        steps = int(dist // YOGUNLUK)
+        if steps < 2:
+            steps = 2
 
-        for i in range(steps_sargi + 1):
-            ratio = i / steps_sargi
+        for i in range(steps + 1):
+            ratio = i / steps
             cx = x1 + (dx * ratio)
             cy = y1 + (dy * ratio)
             
@@ -88,34 +58,44 @@ class ProfesyonelNakis:
                 else:
                     self.pattern.add_stitch_absolute(pyembroidery.STITCH, int(cx - nx), int(cy - ny))
 
-        # === 3. İKİNCİ KAT SARGI (Boşluk kapatma) ===
-        # Hafif kaydırılmış ikinci geçiş
-        kayma = YOGUNLUK / 2
-        for i in range(steps_sargi + 1):
-            ratio = (i + 0.5) / steps_sargi
-            if ratio > 1:
-                ratio = 1
-            cx = x1 + (dx * ratio)
-            cy = y1 + (dy * ratio)
-            
-            if ara_adim > 1:
-                if i % 2 == 0:
-                    for j in range(ara_adim + 1):
-                        t = j / ara_adim
-                        px = cx - nx + (2 * nx * t)
-                        py = cy - ny + (2 * ny * t)
-                        self.pattern.add_stitch_absolute(pyembroidery.STITCH, int(px), int(py))
-                else:
-                    for j in range(ara_adim + 1):
-                        t = j / ara_adim
-                        px = cx + nx - (2 * nx * t)
-                        py = cy + ny - (2 * ny * t)
-                        self.pattern.add_stitch_absolute(pyembroidery.STITCH, int(px), int(py))
-            else:
-                if i % 2 == 0:
-                    self.pattern.add_stitch_absolute(pyembroidery.STITCH, int(cx + nx), int(cy + ny))
-                else:
-                    self.pattern.add_stitch_absolute(pyembroidery.STITCH, int(cx - nx), int(cy - ny))
+    def _harf_dik(self, cizgiler, mevcut_x, by, scale, gen_carpan, yuk_carpan, sargi_kalinligi):
+        """Tek bir harfi kesintisiz olarak diker: 1 JUMP -> underlay -> sargı -> 1 TRIM"""
+        
+        if not cizgiler or len(cizgiler) == 0:
+            return
+
+        # ===== 1. JUMP: Harfin ilk noktasına atla =====
+        ilk = cizgiler[0]
+        gx = mevcut_x + (ilk[0] * scale * gen_carpan)
+        gy = by + (ilk[1] * scale * yuk_carpan)
+        self.pattern.add_stitch_absolute(pyembroidery.JUMP, int(gx), int(gy))
+
+        # ===== 2. UNDERLAY: Tüm segmentleri düz çizgi olarak tek geçişte dik =====
+        for (lx1, ly1, lx2, ly2) in cizgiler:
+            sx = mevcut_x + (lx1 * scale * gen_carpan)
+            sy = by + (ly1 * scale * yuk_carpan)
+            ex = mevcut_x + (lx2 * scale * gen_carpan)
+            ey = by + (ly2 * scale * yuk_carpan)
+            self.pattern.add_stitch_absolute(pyembroidery.STITCH, int(sx), int(sy))
+            self.pattern.add_stitch_absolute(pyembroidery.STITCH, int(ex), int(ey))
+
+        # ===== 3. SARGI: İlk segmentin başına dön, sonra tüm segmentleri sargıla =====
+        ilk_sx = mevcut_x + (cizgiler[0][0] * scale * gen_carpan)
+        ilk_sy = by + (cizgiler[0][1] * scale * yuk_carpan)
+        self.pattern.add_stitch_absolute(pyembroidery.STITCH, int(ilk_sx), int(ilk_sy))
+
+        for (lx1, ly1, lx2, ly2) in cizgiler:
+            sx = mevcut_x + (lx1 * scale * gen_carpan)
+            sy = by + (ly1 * scale * yuk_carpan)
+            ex = mevcut_x + (lx2 * scale * gen_carpan)
+            ey = by + (ly2 * scale * yuk_carpan)
+            # Segment başlangıcına STITCH ile git
+            self.pattern.add_stitch_absolute(pyembroidery.STITCH, int(sx), int(sy))
+            # Satin sargı yap
+            self._sargi_dik(sx, sy, ex, ey, sargi_kalinligi)
+
+        # ===== 4. TRIM: Harf bitti, iplik kes =====
+        self.pattern.add_stitch_absolute(pyembroidery.TRIM, 0, 0)
 
     def isim_yaz(self, metin, baslangic_x, baslangic_y, boyut_cm, birim="cm"):
         if birim == "cm":
@@ -216,21 +196,60 @@ class ProfesyonelNakis:
         }
 
         turkce_buyuk = {
-            'Ç': buyuk_harfler['C'] + [(0.35,-0.15, 0.5,-0.3), (0.5,-0.3, 0.65,-0.15)],
-            'Ğ': buyuk_harfler['G'] + [(0.3,1.1, 0.5,1.2), (0.5,1.2, 0.7,1.1)],
+            'Ç': [
+                (1,0.85, 0.85,1), (0.85,1, 0.15,1), (0.15,1, 0,0.85), (0,0.85, 0,0.15),
+                (0,0.15, 0.15,0), (0.15,0, 0.85,0), (0.85,0, 1,0.15),
+                (0.35,-0.15, 0.5,-0.3), (0.5,-0.3, 0.65,-0.15)
+            ],
+            'Ğ': [
+                (1,1, 0.15,1), (0.15,1, 0,0.85), (0,0.85, 0,0.15), (0,0.15, 0.15,0),
+                (0.15,0, 1,0), (1,0, 1,0.5), (1,0.5, 0.5,0.5),
+                (0.3,1.1, 0.5,1.2), (0.5,1.2, 0.7,1.1)
+            ],
             'İ': [(0.5,0, 0.5,1), (0.5,1.1, 0.5,1.15)],
-            'Ö': buyuk_harfler['O'] + [(0.3,1.1, 0.3,1.18), (0.7,1.1, 0.7,1.18)],
-            'Ş': buyuk_harfler['S'] + [(0.35,-0.15, 0.5,-0.3), (0.5,-0.3, 0.65,-0.15)],
-            'Ü': buyuk_harfler['U'] + [(0.3,1.1, 0.3,1.18), (0.7,1.1, 0.7,1.18)],
+            'Ö': [
+                (0,0.15, 0.15,0), (0.15,0, 0.85,0), (0.85,0, 1,0.15), (1,0.15, 1,0.85),
+                (1,0.85, 0.85,1), (0.85,1, 0.15,1), (0.15,1, 0,0.85), (0,0.85, 0,0.15),
+                (0.3,1.1, 0.3,1.18), (0.7,1.1, 0.7,1.18)
+            ],
+            'Ş': [
+                (1,0.85, 0.85,1), (0.85,1, 0.15,1), (0.15,1, 0,0.85), (0,0.85, 0,0.55),
+                (0,0.55, 0.15,0.5), (0.15,0.5, 0.85,0.5), (0.85,0.5, 1,0.45),
+                (1,0.45, 1,0.15), (1,0.15, 0.85,0), (0.85,0, 0.15,0), (0.15,0, 0,0.15),
+                (0.35,-0.15, 0.5,-0.3), (0.5,-0.3, 0.65,-0.15)
+            ],
+            'Ü': [
+                (0,1, 0,0.15), (0,0.15, 0.15,0), (0.15,0, 0.85,0), (0.85,0, 1,0.15), (1,0.15, 1,1),
+                (0.3,1.1, 0.3,1.18), (0.7,1.1, 0.7,1.18)
+            ],
         }
 
         turkce_kucuk = {
-            'ç': kucuk_harfler['c'] + [(0.3,-0.12, 0.45,-0.25), (0.45,-0.25, 0.6,-0.12)],
-            'ğ': kucuk_harfler['g'] + [(0.25,0.7, 0.45,0.8), (0.45,0.8, 0.65,0.7)],
+            'ç': [
+                (0.85,0.6, 0.2,0.6), (0.2,0.6, 0,0.45), (0,0.45, 0,0.15), (0,0.15, 0.2,0), (0.2,0, 0.85,0),
+                (0.3,-0.12, 0.45,-0.25), (0.45,-0.25, 0.6,-0.12)
+            ],
+            'ğ': [
+                (0.85,0.6, 0.2,0.6), (0.2,0.6, 0,0.45), (0,0.45, 0,0.2), (0,0.2, 0.2,0.05),
+                (0.2,0.05, 0.85,0.05), (0.85,0.6, 0.85,-0.2), (0.85,-0.2, 0.65,-0.35), (0.65,-0.35, 0.15,-0.35),
+                (0.25,0.7, 0.45,0.8), (0.45,0.8, 0.65,0.7)
+            ],
             'ı': [(0.4,0, 0.4,0.6)],
-            'ö': kucuk_harfler['o'] + [(0.25,0.72, 0.25,0.78), (0.6,0.72, 0.6,0.78)],
-            'ş': kucuk_harfler['s'] + [(0.3,-0.12, 0.45,-0.25), (0.45,-0.25, 0.6,-0.12)],
-            'ü': kucuk_harfler['u'] + [(0.25,0.72, 0.25,0.78), (0.6,0.72, 0.6,0.78)],
+            'ö': [
+                (0.2,0, 0,0.15), (0,0.15, 0,0.45), (0,0.45, 0.2,0.6), (0.2,0.6, 0.65,0.6),
+                (0.65,0.6, 0.85,0.45), (0.85,0.45, 0.85,0.15), (0.85,0.15, 0.65,0), (0.65,0, 0.2,0),
+                (0.25,0.72, 0.25,0.78), (0.6,0.72, 0.6,0.78)
+            ],
+            'ş': [
+                (0.8,0.55, 0.6,0.6), (0.6,0.6, 0.2,0.6), (0.2,0.6, 0,0.5), (0,0.5, 0,0.38),
+                (0,0.38, 0.15,0.32), (0.15,0.32, 0.7,0.32), (0.7,0.32, 0.85,0.22),
+                (0.85,0.22, 0.85,0.1), (0.85,0.1, 0.65,0), (0.65,0, 0.2,0), (0.2,0, 0,0.05),
+                (0.3,-0.12, 0.45,-0.25), (0.45,-0.25, 0.6,-0.12)
+            ],
+            'ü': [
+                (0,0.6, 0,0.15), (0,0.15, 0.2,0), (0.2,0, 0.65,0), (0.65,0, 0.85,0.1), (0.85,0.6, 0.85,0),
+                (0.25,0.72, 0.25,0.78), (0.6,0.72, 0.6,0.78)
+            ],
         }
 
         ozel = {
@@ -292,15 +311,9 @@ class ProfesyonelNakis:
                 mevcut_x += scale * 0.3
                 continue
 
-            for idx, (lx1, ly1, lx2, ly2) in enumerate(cizgiler):
-                gx1 = mevcut_x + (lx1 * scale * gen_carpan)
-                gy1 = by + (ly1 * scale * yuk_carpan)
-                gx2 = mevcut_x + (lx2 * scale * gen_carpan)
-                gy2 = by + (ly2 * scale * yuk_carpan)
-                self.tam_sargi_yap(gx1, gy1, gx2, gy2, sargi_kalinligi, ilk_segment=(idx == 0))
+            # Harfi tek seferde dik
+            self._harf_dik(cizgiler, mevcut_x, by, scale, gen_carpan, yuk_carpan, sargi_kalinligi)
 
-            # Harf bitti, TRIM ekle (harfler arası temiz geçiş)
-            self.pattern.add_stitch_absolute(pyembroidery.TRIM, 0, 0)
             mevcut_x += (scale * gen_carpan) + bosluk
 
     def onizleme_olustur(self, dosya_adi):
@@ -358,9 +371,9 @@ if __name__ == "__main__":
     # AYARLAR (İSTEDİĞİNİZ GİBİ DEĞİŞTİRİN)
     # ========================================
     
-    MUSTERI_ISMI = "Mehmet Öz 2025"   # Büyük/küçük harf, Türkçe, sayı hepsi desteklenir
-    BOYUT = 2.5                        # Harf boyutu
-    BIRIM = "cm"                       # "cm" veya "mm"
+    MUSTERI_ISMI = "Mehmet Öz 2025"
+    BOYUT = 2.5
+    BIRIM = "cm"
     
     # ========================================
     
