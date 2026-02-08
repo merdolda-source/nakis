@@ -21,11 +21,6 @@ class ProfesyonelNakis:
         nx = -dy / dist * (genislik / 2)
         ny = dx / dist * (genislik / 2)
 
-        # 1. ALT DOLGU (UNDERLAY)
-        kucultme = 0.7
-        nx_alt = nx * kucultme
-        ny_alt = ny * kucultme
-
         self.pattern.add_stitch_absolute(pyembroidery.JUMP, x1, y1)
         
         steps_alt = int(dist // 30) + 1
@@ -34,7 +29,6 @@ class ProfesyonelNakis:
         
         self.pattern.add_stitch_absolute(pyembroidery.STITCH, int(x1), int(y1))
 
-        # 2. SÜPER SIKI SARGI (TOP SATIN)
         YOGUNLUK = 3 
         
         steps_sargi = int(dist // YOGUNLUK)
@@ -56,8 +50,7 @@ class ProfesyonelNakis:
         bosluk = scale * 0.25 
 
         alfabe = {
-            'A': [(0,0, 0.5,1), (0.5,1, 1,0), (0.2,0.4, 0.8,0.4)],
-            # Define other characters here...
+            # Define your alphabet here...
         }
 
         sargi_kalinligi = harf_boyu_mm * 0.13
@@ -120,11 +113,10 @@ class ProfesyonelNakis:
         ad_temiz = dosya_adi.replace(" ", "_").lower()
         
         pyembroidery.write(self.pattern, f"{ad_temiz}.dst")
-        pyembroidery.write(self.pattern, f"{ad_temiz}.jef")
         
         self.onizleme_olustur(ad_temiz)
         
-        print(f"✅ NAKIŞ DOSYALARI HAZIR: {ad_temiz}.jef")
+        print(f"✅ NAKIŞ DOSYALARI HAZIR: {ad_temiz}.dst")
 
 if __name__ == "__main__":
     
