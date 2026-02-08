@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Profesyonel Nakış Yazı Makinesi v3
+Profesyonel Nakış Yazı Makinesi v4
 Her harf: 1 JUMP → Underlay ileri → Sargı geri → 1 TRIM
 Harf içinde sıfır atlama, sıfır duraksama
+YENİ: Belirtilen alana (genişlik x yükseklik) otomatik sığdırma
 """
 
 import pyembroidery
@@ -56,7 +57,6 @@ class ProfesyonelNakis:
             else:
                 self.pattern.add_stitch_absolute(
                     pyembroidery.STITCH, int(cx - nx), int(cy - ny))
-        # Segment bitiş noktasına kilitle
         self.pattern.add_stitch_absolute(pyembroidery.STITCH, int(x2), int(y2))
         return (x2, y2)
 
@@ -97,22 +97,144 @@ class ProfesyonelNakis:
         self.pattern.add_stitch_absolute(
             pyembroidery.TRIM, int(cx), int(cy))
 
-    # ── İsim Yazma ───────────────────────────────────────────────
+    # ── Metin Boyutlarını Hesapla ────────────────────────────────
 
-    def isim_yaz(self, metin, baslangic_x, baslangic_y, boyut, birim="cm"):
+    def _metin_boyut_hesapla(self, metin):
+        """Metnin normalize edilmiş genişlik ve yükseklik oranlarını hesapla"""
+        BG, KG, KY, SG = 0.70, 0.55, 0.60, 0.65
+        
+        # Harf sözlükleri (sadece var olup olmadığını kontrol için)
+        buyuk_harfler = set('ABCDEFGHIJKLMNOPQRSTUVWXYZ')
+        kucuk_harfler = set('abcdefghijklmnopqrstuvwxyz')
+        tr_buyuk = set('ÇĞİÖŞÜ')
+        tr_kucuk = set('çğıöşü')
+        sayilar_set = set('0123456789')
+        ozel_set = set('-.,!?/:#')
+        
+        toplam_genislik = 0
+        max_yukseklik = 1.0  # Normalize edilmiş yükseklik
+        min_y = 0  # Alt sınır (g, y gibi harfler için)
+        max_y = 1.0  # Üst sınır
+        
+        ara_oran = 0.25  # Harfler arası boşluk oranı
+        
+        for i, harf in enumerate(metin):
+            if harf == ' ':
+                toplam_genislik += 0.5
+                continue
+            
+            gx = 0
+            if harf in buyuk_harfler or harf in tr_buyuk:
+                gx = BG
+                max_y = max(max_y, 1.0)
+                if harf in 'ĞİÖÜ':
+                    max_y = max(max_y, 1.2)
+                if harf in 'ÇŞ':
+                    min_y = min(min_y, -0.3)
+            elif harf in kucuk_harfler or harf in tr_kucuk:
+                gx = KG
+                if harf in 'gjyçğ':
+                    min_y = min(min_y, -0.35)
+                if harf in 'bdfhiklt':
+                    max_y = max(max_y, 1.0)
+                else:
+                    max_y = max(max_y, 0.6)
+                if harf in 'öü':
+                    max_y = max(max_y, 0.78)
+            elif harf in sayilar_set:
+                gx = SG
+            elif harf in ozel_set:
+                gx = 0.5
+                if harf == '!':
+                    max_y = max(max_y, 1.0)
+            else:
+                gx = 0.3
+            
+            toplam_genislik += gx
+            # Son harf değilse ara boşluk ekle
+            if i < len(metin) - 1 and metin[i + 1] != ' ':
+                toplam_genislik += ara_oran
+        
+        toplam_yukseklik = max_y - min_y
+        
+        return toplam_genislik, toplam_yukseklik, min_y
 
+    # ── İsim Yazma (Alana Sığdırmalı) ────────────────────────────
+
+    def isim_yaz(self, metin, baslangic_x, baslangic_y, boyut=None, birim="cm",
+                 genislik=None, yukseklik=None):
+        """
+        Metin yazar.
+        
+        Kullanım 1 - Sadece boyut ile (eski yöntem):
+            isim_yaz("Mehmet", 0, 0, boyut=2, birim="cm")
+        
+        Kullanım 2 - Alana sığdırma (yeni yöntem):
+            isim_yaz("Mehmet", 0, 0, genislik=10, yukseklik=2, birim="cm")
+        
+        Parametreler:
+            metin: Yazılacak metin
+            baslangic_x, baslangic_y: Başlangıç koordinatları
+            boyut: Harf yüksekliği (eski yöntem)
+            birim: "cm" veya "mm"
+            genislik: İstenen toplam genişlik (yeni yöntem)
+            yukseklik: İstenen toplam yükseklik (yeni yöntem)
+        """
+        
+        # Birim dönüşümü
         if birim == "cm":
-            harf_mm = boyut * 10
-            bx, by = baslangic_x * 100, baslangic_y * 100
+            birim_carpan = 100  # cm -> 0.1mm (pyembroidery birimi)
         elif birim == "mm":
-            harf_mm = boyut
-            bx, by = baslangic_x * 10, baslangic_y * 10
+            birim_carpan = 10   # mm -> 0.1mm
         else:
-            harf_mm = boyut * 10
-            bx, by = baslangic_x * 100, baslangic_y * 100
+            birim_carpan = 100
+        
+        bx = baslangic_x * birim_carpan
+        by = baslangic_y * birim_carpan
+        
+        # Metin boyutlarını hesapla
+        metin_gen_oran, metin_yuk_oran, min_y_oran = self._metin_boyut_hesapla(metin)
+        
+        # Boyut hesaplama
+        if genislik is not None and yukseklik is not None:
+            # Alana sığdırma modu
+            gen_px = genislik * birim_carpan
+            yuk_px = yukseklik * birim_carpan
+            
+            # Her iki boyuta göre ölçek hesapla, küçük olanı seç
+            olcek_gen = gen_px / metin_gen_oran if metin_gen_oran > 0 else gen_px
+            olcek_yuk = yuk_px / metin_yuk_oran if metin_yuk_oran > 0 else yuk_px
+            
+            sc = min(olcek_gen, olcek_yuk)
+            
+            # Merkeze hizalama için offset hesapla
+            gercek_gen = metin_gen_oran * sc
+            gercek_yuk = metin_yuk_oran * sc
+            
+            # X ekseni merkezleme
+            x_offset = (gen_px - gercek_gen) / 2
+            bx += x_offset
+            
+            # Y ekseni merkezleme (min_y'yi hesaba kat)
+            y_offset = (yuk_px - gercek_yuk) / 2 - (min_y_oran * sc)
+            by += y_offset
+            
+            harf_mm = sc / 10  # Kalınlık hesabı için
+            
+            print(f"  📐 Alan: {genislik}x{yukseklik} {birim}")
+            print(f"  📏 Hesaplanan ölçek: {sc/birim_carpan:.2f} {birim}")
+            print(f"  📦 Gerçek boyut: {gercek_gen/birim_carpan:.2f}x{gercek_yuk/birim_carpan:.2f} {birim}")
+            
+        elif boyut is not None:
+            # Eski yöntem - sadece boyut
+            harf_mm = boyut * (10 if birim == "cm" else 1)
+            sc = harf_mm * 10
+        else:
+            # Varsayılan
+            harf_mm = 20  # 2cm
+            sc = harf_mm * 10
 
         mx = bx
-        sc = harf_mm * 10
         ara = sc * 0.25
         BG, KG, KY, SG = 0.70, 0.55, 0.60, 0.65
 
@@ -464,13 +586,20 @@ if __name__ == '__main__':
 
     # ─── AYARLAR ──────────────────────────────────────────────────
     ISIM  = "SELMAN"
-    BOYUT = 2.5              # harf yüksekliği
     BIRIM = "cm"             # "cm" veya "mm"
+    
+    # ═══════════════════════════════════════════════════════════════
+    # YENİ ÖZELLİK: Alana Sığdırma
+    # ═══════════════════════════════════════════════════════════════
+    # Seçenek 1: Sadece boyut ver (eski yöntem)
+    # m.isim_yaz(ISIM, 0, 0, boyut=2.5, birim=BIRIM)
+    
+    # Seçenek 2: Genişlik ve yükseklik ver (yeni yöntem)
+    # Yazı bu alana sığacak şekilde otomatik ölçeklenir
+    GENISLIK = 10   # cm (veya mm, BIRIM'e göre)
+    YUKSEKLIK = 5   # cm (veya mm, BIRIM'e göre)
+    
+    m.isim_yaz(ISIM, 0, 0, genislik=GENISLIK, yukseklik=YUKSEKLIK, birim=BIRIM)
     # ──────────────────────────────────────────────────────────────
 
-    harf_say  = len(ISIM.replace(' ', ''))
-    bosluk_say = ISIM.count(' ')
-    toplam = harf_say * BOYUT * 0.85 + bosluk_say * BOYUT * 0.5
-
-    m.isim_yaz(ISIM, -toplam / 2, 0, BOYUT, birim=BIRIM)
     m.kaydet(ISIM)
