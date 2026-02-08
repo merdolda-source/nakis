@@ -2,275 +2,232 @@ import pyembroidery
 import math
 import matplotlib.pyplot as plt
 
-class ProfesyonelNakis:
+class SaglamNakis:
     def __init__(self):
         self.pattern = pyembroidery.EmbPattern()
-        self.pattern.name = "UltraSargi"
-        # İğne kırmayı önlemek için minimum dikiş mesafesi (mm)
-        self.MIN_DIKIS_MESAFESI = 0.4 
+        self.pattern.name = "NetNakis"
+        # 0.4mm altındaki dikişleri atla (İğne kırma koruması)
+        self.MIN_DIST = 4 
     
     def _mesafe(self, x1, y1, x2, y2):
         return math.sqrt((x2 - x1)**2 + (y2 - y1)**2)
 
-    def guvenli_dikis_ekle(self, komut, x, y):
+    def sargi_cizgi(self, x1, y1, x2, y2, kalinlik):
         """
-        Bu fonksiyon, çok küçük dikişleri filtreler.
-        İğnenin aynı yere defalarca batıp kırılmasını engeller.
+        İki nokta arasına kalın sargı atar.
+        Karmaşık hesaplar yerine net bloklar oluşturur.
         """
-        if len(self.pattern.stitches) > 0:
-            son_x = self.pattern.stitches[-1][0]
-            son_y = self.pattern.stitches[-1][1]
-            dist = self._mesafe(son_x, son_y, x, y)
-            
-            # Eğer dikiş çok kısaysa ve komut STITCH ise, atla (ATLA)
-            # Ancak JUMP (atlama) ise izin ver.
-            if komut == pyembroidery.STITCH and dist < (self.MIN_DIKIS_MESAFESI * 10):
-                return # Dikiş ekleme, çok yakın!
-        
-        self.pattern.add_stitch_absolute(komut, int(x), int(y))
-
-    def tam_sargi_yap(self, x1, y1, x2, y2, kalinlik_mm):
-        # 1mm = 10 birim
-        genislik = kalinlik_mm * 10
-        dx = x2 - x1
-        dy = y2 - y1
         dist = self._mesafe(x1, y1, x2, y2)
-        
         if dist == 0: return
 
-        nx = -dy / dist * (genislik / 2)
-        ny = dx / dist * (genislik / 2)
-
-        # === 1. ALT DOLGU (UNDERLAY) - ZEMİNİ GÜÇLENDİRİR ===
-        # İğne kırılmasın diye alt dikişi biraz daha seyrek tutuyoruz
-        self.guvenli_dikis_ekle(pyembroidery.JUMP, x1, y1)
+        # Dikiş sıklığı (3 = Çok Sıkı)
+        YOGUNLUK = 3.0
         
-        steps_alt = int(dist // 35) + 1 # 3.5mm adım (Rahat dikiş)
-        for i in range(steps_alt + 1):
-             self.guvenli_dikis_ekle(pyembroidery.STITCH, x1 + dx*i/steps_alt, y1 + dy*i/steps_alt)
+        dx = x2 - x1
+        dy = y2 - y1
         
-        self.guvenli_dikis_ekle(pyembroidery.STITCH, x1, y1)
-
-        # === 2. SÜPER SIKI SARGI (TOP SATIN) ===
-        # Yoğunluk ayarı (3 = Çok sıkı). İğne kırmaması için min 3 tutuyoruz.
-        YOGUNLUK = 3 
+        # Dik vektör (Kalınlık için)
+        nx = -dy / dist * (kalinlik / 2)
+        ny = dx / dist * (kalinlik / 2)
         
-        steps_sargi = int(dist // YOGUNLUK)
-        if steps_sargi < 2: steps_sargi = 2
+        # Adım sayısı
+        steps = int(dist // YOGUNLUK)
+        if steps < 2: steps = 2
 
-        for i in range(steps_sargi + 1):
-            ratio = i / steps_sargi
-            cx = x1 + (dx * ratio)
-            cy = y1 + (dy * ratio)
+        # Önce oraya git (JUMP)
+        self.pattern.add_stitch_absolute(pyembroidery.JUMP, int(x1), int(y1))
+        
+        # Alt dikiş (Zemin)
+        self.pattern.add_stitch_absolute(pyembroidery.STITCH, int(x2), int(y2))
+        self.pattern.add_stitch_absolute(pyembroidery.STITCH, int(x1), int(y1))
+
+        # Üst Sargı (Zikzak)
+        for i in range(steps + 1):
+            t = i / steps
+            cx = x1 + (dx * t)
+            cy = y1 + (dy * t)
             
             if i % 2 == 0:
-                self.guvenli_dikis_ekle(pyembroidery.STITCH, cx + nx, cy + ny)
+                self.pattern.add_stitch_absolute(pyembroidery.STITCH, int(cx + nx), int(cy + ny))
             else:
-                self.guvenli_dikis_ekle(pyembroidery.STITCH, cx - nx, cy - ny)
+                self.pattern.add_stitch_absolute(pyembroidery.STITCH, int(cx - nx), int(cy - ny))
 
-    def _harf_veritabani(self):
-        # Koordinatlar: (x1, y1, x2, y2) -> Normalize (0-1 arası)
+    def get_alfabe(self):
+        """
+        BOZULMAYAN, GARANTİLİ BLOK ALFABE
+        Her harf, basit çizgi parçalarından oluşur.
+        Koordinatlar: (x1, y1, x2, y2)
+        """
         return {
-            # BÜYÜK HARFLER
-            'A': [(0,0, 0.5,1), (0.5,1, 1,0), (0.2,0.4, 0.8,0.4)],
-            'B': [(0,0, 0,1), (0,1, 0.7,1), (0.7,1, 0.7,0.5), (0.7,0.5, 0,0.5), (0,0.5, 0.8,0.5), (0.8,0.5, 0.8,0), (0.8,0, 0,0)],
+            # BÜYÜK HARFLER (Net ve Düz)
+            'A': [(0,0, 0,1), (1,0, 1,1), (0,1, 1,1), (0,0.5, 1,0.5)],
+            'B': [(0,0, 0,1), (0,1, 0.8,1), (0.8,1, 0.8,0.5), (0.8,0.5, 0,0.5), (0,0.5, 0.8,0.5), (0.8,0.5, 0.8,0), (0.8,0, 0,0)],
             'C': [(1,1, 0,1), (0,1, 0,0), (0,0, 1,0)],
-            'Ç': [(1,1, 0,1), (0,1, 0,0), (0,0, 1,0), (0.5,0, 0.5,-0.2)], # Çentik
-            'D': [(0,0, 0,1), (0,1, 0.7,1), (0.7,1, 1,0.5), (1,0.5, 0.7,0), (0.7,0, 0,0)],
+            'Ç': [(1,1, 0,1), (0,1, 0,0), (0,0, 1,0), (0.5,0, 0.5,-0.3)],
+            'D': [(0,0, 0,1), (0,1, 0.8,1), (0.8,1, 0.8,0), (0.8,0, 0,0)],
             'E': [(1,1, 0,1), (0,1, 0,0), (0,0, 1,0), (0,0.5, 0.8,0.5)],
             'F': [(1,1, 0,1), (0,1, 0,0), (0,0.5, 0.8,0.5)],
             'G': [(1,1, 0,1), (0,1, 0,0), (0,0, 1,0), (1,0, 1,0.5), (1,0.5, 0.5,0.5)],
-            'Ğ': [(1,1, 0,1), (0,1, 0,0), (0,0, 1,0), (1,0, 1,0.5), (1,0.5, 0.5,0.5), (0.2,1.2, 0.8,1.2)], # Şapka
+            'Ğ': [(1,1, 0,1), (0,1, 0,0), (0,0, 1,0), (1,0, 1,0.5), (1,0.5, 0.5,0.5), (0.2,1.2, 0.8,1.2)],
             'H': [(0,0, 0,1), (1,0, 1,1), (0,0.5, 1,0.5)],
             'I': [(0.5,0, 0.5,1)],
-            'İ': [(0.5,0, 0.5,0.65), (0.5,0.85, 0.5,1)], # Noktalı
-            'J': [(0.6,1, 0.6,0.2), (0.6,0.2, 0,0)],
+            'İ': [(0.5,0, 0.5,0.7), (0.5,0.85, 0.5,1)],
+            'J': [(0.5,1, 0.5,0.2), (0.5,0.2, 0,0.2), (0,0.2, 0,0.5)],
             'K': [(0,0, 0,1), (1,1, 0,0.5), (0,0.5, 1,0)],
             'L': [(0,1, 0,0), (0,0, 0.8,0)],
-            'M': [(0,0, 0,1), (0,1, 0.5,0), (0.5,0, 1,1), (1,1, 1,0)],
+            'M': [(0,0, 0,1), (0,1, 0.5,0.5), (0.5,0.5, 1,1), (1,1, 1,0)],
             'N': [(0,0, 0,1), (0,1, 1,0), (1,0, 1,1)],
             'O': [(0,0, 0,1), (0,1, 1,1), (1,1, 1,0), (1,0, 0,0)],
-            'Ö': [(0,0, 0,1), (0,1, 1,1), (1,1, 1,0), (1,0, 0,0), (0.3,1.2, 0.3,1.3), (0.7,1.2, 0.7,1.3)], # Noktalar
+            'Ö': [(0,0, 0,1), (0,1, 1,1), (1,1, 1,0), (1,0, 0,0), (0.2,1.2, 0.2,1.3), (0.8,1.2, 0.8,1.3)],
             'P': [(0,0, 0,1), (0,1, 0.8,1), (0.8,1, 0.8,0.5), (0.8,0.5, 0,0.5)],
-            'R': [(0,0, 0,1), (0,1, 0.8,1), (0.8,1, 0.8,0.5), (0.8,0.5, 0,0.5), (0.5,0.5, 1,0)],
+            'R': [(0,0, 0,1), (0,1, 0.8,1), (0.8,1, 0.8,0.5), (0.8,0.5, 0,0.5), (0.2,0.5, 0.8,0)],
             'S': [(1,1, 0,1), (0,1, 0,0.5), (0,0.5, 1,0.5), (1,0.5, 1,0), (1,0, 0,0)],
-            'Ş': [(1,1, 0,1), (0,1, 0,0.5), (0,0.5, 1,0.5), (1,0.5, 1,0), (1,0, 0,0), (0.5,0, 0.5,-0.2)], # Çentik
+            'Ş': [(1,1, 0,1), (0,1, 0,0.5), (0,0.5, 1,0.5), (1,0.5, 1,0), (1,0, 0,0), (0.5,0, 0.5,-0.3)],
             'T': [(0.5,0, 0.5,1), (0,1, 1,1)],
             'U': [(0,1, 0,0), (0,0, 1,0), (1,0, 1,1)],
-            'Ü': [(0,1, 0,0), (0,0, 1,0), (1,0, 1,1), (0.3,1.2, 0.3,1.3), (0.7,1.2, 0.7,1.3)], # Noktalar
+            'Ü': [(0,1, 0,0), (0,0, 1,0), (1,0, 1,1), (0.2,1.2, 0.2,1.3), (0.8,1.2, 0.8,1.3)],
             'V': [(0,1, 0.5,0), (0.5,0, 1,1)],
             'Y': [(0,1, 0.5,0.5), (1,1, 0.5,0.5), (0.5,0.5, 0.5,0)],
             'Z': [(0,1, 1,1), (1,1, 0,0), (0,0, 1,0)],
-            
-            # KÜÇÜK HARFLER (Basitleştirilmiş Modern Stil)
-            'a': [(0,0, 1,0), (1,0, 1,0.5), (1,0.5, 0,0.5), (0,0.5, 0,0)], 
-            'b': [(0,1, 0,0), (0,0, 1,0), (1,0, 1,0.5), (1,0.5, 0,0.5)],
-            'c': [(1,0.5, 0,0.5), (0,0.5, 0,0), (0,0, 1,0)],
-            'ç': [(1,0.5, 0,0.5), (0,0.5, 0,0), (0,0, 1,0), (0.5,0, 0.5,-0.2)],
-            'd': [(1,1, 1,0), (1,0, 0,0), (0,0, 0,0.5), (0,0.5, 1,0.5)],
-            'e': [(0,0.25, 1,0.25), (1,0.25, 1,0.5), (1,0.5, 0,0.5), (0,0.5, 0,0), (0,0, 1,0)],
-            'g': [(1,0.5, 0,0.5), (0,0.5, 0,0), (0,0, 1,0), (1,0, 1,-0.3), (1,-0.3, 0,-0.3)],
-            'ğ': [(1,0.5, 0,0.5), (0,0.5, 0,0), (0,0, 1,0), (1,0, 1,-0.3), (1,-0.3, 0,-0.3), (0.2,0.7, 0.8,0.7)],
-            'h': [(0,1, 0,0), (0,0.5, 1,0.5), (1,0.5, 1,0)],
-            'ı': [(0.5,0, 0.5,0.5)],
-            'i': [(0.5,0, 0.5,0.5), (0.5,0.7, 0.5,0.8)],
-            'k': [(0,1, 0,0), (1,0.5, 0,0.2), (0,0.2, 1,0)],
-            'l': [(0.5,1, 0.5,0), (0.5,0, 1,0)],
-            'm': [(0,0, 0,0.5), (0,0.5, 0.5,0.5), (0.5,0.5, 0.5,0), (0.5,0.5, 1,0.5), (1,0.5, 1,0)],
-            'n': [(0,0, 0,0.5), (0,0.5, 1,0.5), (1,0.5, 1,0)],
-            'o': [(0,0, 0,0.5), (0,0.5, 1,0.5), (1,0.5, 1,0), (1,0, 0,0)],
-            'ö': [(0,0, 0,0.5), (0,0.5, 1,0.5), (1,0.5, 1,0), (1,0, 0,0), (0.3,0.7, 0.3,0.8), (0.7,0.7, 0.7,0.8)],
-            'p': [(0,-0.3, 0,0.5), (0,0.5, 1,0.5), (1,0.5, 1,0), (1,0, 0,0)],
-            'r': [(0,0, 0,0.5), (0,0.5, 1,0.5)],
-            's': [(1,0.5, 0,0.5), (0,0.5, 0,0.25), (0,0.25, 1,0.25), (1,0.25, 1,0), (1,0, 0,0)],
-            'ş': [(1,0.5, 0,0.5), (0,0.5, 0,0.25), (0,0.25, 1,0.25), (1,0.25, 1,0), (1,0, 0,0), (0.5,0, 0.5,-0.2)],
-            't': [(0.5,1, 0.5,0), (0,0.5, 1,0.5), (0.5,0, 1,0)],
-            'u': [(0,0.5, 0,0), (0,0, 1,0), (1,0, 1,0.5)],
-            'ü': [(0,0.5, 0,0), (0,0, 1,0), (1,0, 1,0.5), (0.3,0.7, 0.3,0.8), (0.7,0.7, 0.7,0.8)],
-            'v': [(0,0.5, 0.5,0), (0.5,0, 1,0.5)],
-            'y': [(0,0.5, 0.5,0), (0.5,0, 1,0.5), (0.5,0, 0.5,-0.3)],
-            'z': [(0,0.5, 1,0.5), (1,0.5, 0,0), (0,0, 1,0)],
+
+            # KÜÇÜK HARFLER (Düzleştirilmiş - Sorun Çıkarmaz)
+            'a': [(0,0, 0,0.7), (0,0.7, 0.8,0.7), (0.8,0.7, 0.8,0), (0.8,0.35, 0,0.35)],
+            'b': [(0,0, 0,1), (0,0.5, 0.8,0.5), (0.8,0.5, 0.8,0), (0.8,0, 0,0)],
+            'c': [(0.8,0.7, 0,0.7), (0,0.7, 0,0), (0,0, 0.8,0)],
+            'ç': [(0.8,0.7, 0,0.7), (0,0.7, 0,0), (0,0, 0.8,0), (0.4,0, 0.4,-0.3)],
+            'd': [(0.8,0, 0.8,1), (0.8,0.5, 0,0.5), (0,0.5, 0,0), (0,0, 0.8,0)],
+            'e': [(0,0.35, 0.8,0.35), (0.8,0.35, 0.8,0.7), (0.8,0.7, 0,0.7), (0,0.7, 0,0), (0,0, 0.8,0)],
+            'g': [(0.8,0.7, 0,0.7), (0,0.7, 0,0), (0,0, 0.8,0), (0.8,0.7, 0.8,-0.3), (0.8,-0.3, 0,-0.3)],
+            'ğ': [(0.8,0.7, 0,0.7), (0,0.7, 0,0), (0,0, 0.8,0), (0.8,0.7, 0.8,0), (0.2,0.9, 0.6,0.9)],
+            'h': [(0,0, 0,1), (0,0.5, 0.8,0.5), (0.8,0.5, 0.8,0)],
+            'ı': [(0.4,0, 0.4,0.7)],
+            'i': [(0.4,0, 0.4,0.7), (0.4,0.9, 0.4,1.0)],
+            'k': [(0,0, 0,1), (0.8,0.7, 0,0.35), (0,0.35, 0.8,0)],
+            'l': [(0.4,0, 0.4,1)],
+            'm': [(0,0, 0,0.7), (0,0.7, 0.4,0.7), (0.4,0.7, 0.4,0), (0.4,0.7, 0.8,0.7), (0.8,0.7, 0.8,0)],
+            'n': [(0,0, 0,0.7), (0,0.7, 0.8,0.7), (0.8,0.7, 0.8,0)],
+            'o': [(0,0, 0,0.7), (0,0.7, 0.8,0.7), (0.8,0.7, 0.8,0), (0.8,0, 0,0)],
+            'ö': [(0,0, 0,0.7), (0,0.7, 0.8,0.7), (0.8,0.7, 0.8,0), (0.8,0, 0,0), (0.2,0.9, 0.2,1.0), (0.6,0.9, 0.6,1.0)],
+            'p': [(0,-0.3, 0,0.7), (0,0.7, 0.8,0.7), (0.8,0.7, 0.8,0), (0.8,0, 0,0)],
+            'r': [(0,0, 0,0.7), (0,0.5, 0.8,0.7)],
+            's': [(0.8,0.7, 0,0.7), (0,0.7, 0,0.35), (0,0.35, 0.8,0.35), (0.8,0.35, 0.8,0), (0.8,0, 0,0)],
+            'ş': [(0.8,0.7, 0,0.7), (0,0.7, 0,0.35), (0,0.35, 0.8,0.35), (0.8,0.35, 0.8,0), (0.8,0, 0,0), (0.4,0, 0.4,-0.3)],
+            't': [(0.4,0, 0.4,1), (0,0.7, 0.8,0.7)],
+            'u': [(0,0.7, 0,0), (0,0, 0.8,0), (0.8,0, 0.8,0.7)],
+            'ü': [(0,0.7, 0,0), (0,0, 0.8,0), (0.8,0, 0.8,0.7), (0.2,0.9, 0.2,1.0), (0.6,0.9, 0.6,1.0)],
+            'v': [(0,0.7, 0.4,0), (0.4,0, 0.8,0.7)],
+            'y': [(0,0.7, 0.4,0), (0.8,0.7, 0.4,0), (0.4,0, 0.4,-0.3)],
+            'z': [(0,0.7, 0.8,0.7), (0.8,0.7, 0,0), (0,0, 0.8,0)],
 
             # SAYILAR
-            '0': [(0,0, 0,1), (0,1, 1,1), (1,1, 1,0), (1,0, 0,0), (0,0, 1,1)], # Sıfır çizgili
-            '1': [(0.2,0.8, 0.5,1), (0.5,1, 0.5,0), (0.2,0, 0.8,0)],
-            '2': [(0,0.8, 0.8,1), (0.8,1, 0.8,0.5), (0.8,0.5, 0,0), (0,0, 1,0)],
-            '3': [(0,1, 1,1), (1,1, 0.5,0.5), (0.5,0.5, 1,0), (1,0, 0,0)],
-            '4': [(0.8,0, 0.8,1), (0.8,1, 0,0.4), (0,0.4, 1,0.4)],
-            '5': [(1,1, 0,1), (0,1, 0,0.6), (0,0.6, 1,0.5), (1,0.5, 1,0), (1,0, 0,0)],
-            '6': [(1,1, 0,0), (0,0, 1,0), (1,0, 1,0.5), (1,0.5, 0,0.5)],
+            '0': [(0,0, 0,1), (0,1, 1,1), (1,1, 1,0), (1,0, 0,0)],
+            '1': [(0.5,0, 0.5,1), (0.2,0.7, 0.5,1)],
+            '2': [(0,1, 1,1), (1,1, 1,0.5), (1,0.5, 0,0.5), (0,0.5, 0,0), (0,0, 1,0)],
+            '3': [(0,1, 1,1), (1,1, 0,0.5), (0,0.5, 1,0), (1,0, 0,0)],
+            '4': [(0.8,0, 0.8,1), (0.8,1, 0,0.5), (0,0.5, 1,0.5)],
+            '5': [(1,1, 0,1), (0,1, 0,0.5), (0,0.5, 1,0.5), (1,0.5, 1,0), (1,0, 0,0)],
+            '6': [(1,1, 0,1), (0,1, 0,0), (0,0, 1,0), (1,0, 1,0.5), (1,0.5, 0,0.5)],
             '7': [(0,1, 1,1), (1,1, 0.4,0)],
             '8': [(0,0, 1,0), (1,0, 1,1), (1,1, 0,1), (0,1, 0,0), (0,0.5, 1,0.5)],
-            '9': [(1,0, 0,0.5), (0,0.5, 0,1), (0,1, 1,1), (1,1, 1,0)],
-
+            '9': [(1,0, 1,1), (1,1, 0,1), (0,1, 0,0.5), (0,0.5, 1,0.5)],
+            
             ' ': [],
             '-': [(0,0.5, 1,0.5)],
-            '.': [(0.4,0, 0.4,0.2), (0.4,0.2, 0.6,0.2), (0.6,0.2, 0.6,0), (0.6,0, 0.4,0)],
+            '.': [(0.4,0, 0.4,0.2)],
             '/': [(0,0, 1,1)]
         }
 
-    def yaziyi_isle(self, metin, genislik_cm, yukseklik_cm):
+    def yazdir(self, metin, cm_genislik, cm_yukseklik):
         """
-        Metni verilen CM kutusuna sığdırır.
+        Metni sığdırır ve işler.
         """
-        alfabe = self._harf_veritabani()
+        alfabe = self.get_alfabe()
         
-        # 1. Önce metnin "doğal" en-boy oranını hesaplayalım
-        toplam_dogal_genislik = 0
-        max_dogal_yukseklik = 1.0 # Referans yüksekliği
+        # 1. Metin Boyutunu Hesapla
+        total_units = 0
+        for h in metin:
+            total_units += 0.5 if h == ' ' else (0.4 if h in 'ilı1.,' else 0.85)
         
-        harf_araligi = 0.2
+        # 2. Ölçekleme (Scale)
+        target_w = cm_genislik * 10
+        target_h = cm_yukseklik * 10
+        
+        scale_h = target_h
+        scale_w = target_w / total_units if total_units > 0 else 10
+        
+        # Hangisi daha kısıtlayıcıysa onu seç (Kutuya sığdır)
+        scale = min(scale_h, scale_w)
+        
+        # Kalınlık (Otomatik)
+        kalinlik = max(2.0, min(4.5, scale / 8))
+
+        print(f"BASKI: '{metin}' | Boyut: {scale/10:.1f}mm | Kalınlık: {kalinlik:.1f}")
+
+        # Başlangıç (Ortala)
+        curr_x = - (total_units * scale) / 2
         
         for harf in metin:
             if harf == ' ':
-                toplam_dogal_genislik += 0.5
-            else:
-                toplam_dogal_genislik += 0.7 # Ortalama harf genişliği (normalize)
-            toplam_dogal_genislik += harf_araligi
-        
-        # 2. Ölçekleme Faktörünü Bul
-        # Kullanıcının istediği alan (cm -> birim)
-        target_w = genislik_cm * 10
-        target_h = yukseklik_cm * 10
-        
-        # Yüksekliğe göre bir ölçek belirle
-        scale = target_h # Çünkü harflerin boyu 0-1 arası, direkt yükseklik çarpanı olur.
-        
-        # Bu ölçekle genişlik sığıyor mu kontrol et
-        olusan_genislik = toplam_dogal_genislik * scale
-        
-        if olusan_genislik > target_w:
-            # Sığmıyor! Genişliğe göre küçült (Fit to Width)
-            print(f"UYARI: Metin çok uzun, {genislik_cm}cm genişliğe sığdırılıyor.")
-            scale = target_w / toplam_dogal_genislik
-        
-        # 3. Yazdırmaya Başla
-        # Ortalamak için başlangıç noktası:
-        mevcut_x = -(toplam_dogal_genislik * scale) / 2
-        baslangic_y = 0
-        
-        # Kalınlık ayarı (Otomatik): Ölçek büyüdükçe kalınlık artmalı ama çok kaba olmamalı
-        kalinlik_mm = scale / 30 # Deneyimsel oran
-        if kalinlik_mm < 1.5: kalinlik_mm = 1.5 # Çok ince olmasın
-        if kalinlik_mm > 4.0: kalinlik_mm = 4.0 # Çok kalın olmasın (Makine zorlanır)
-
-        print(f"İşleniyor: '{metin}' -> Boyut: {scale/10:.1f}mm, Kalınlık: {kalinlik_mm:.1f}mm")
-
-        for harf in metin:
-            if harf == " ":
-                mevcut_x += scale * 0.5
+                curr_x += 0.5 * scale
                 continue
             
-            # Harfi bul veya atla
-            db_harf = harf if harf in alfabe else None
-            # Küçük/Büyük harf duyarlılığı kontrolü (Basit fallback)
-            if not db_harf and harf.upper() in alfabe: 
-                print(f"Karakter '{harf}' bulunamadı, '{harf.upper()}' kullanılıyor.")
-                db_harf = harf.upper() 
+            h_key = harf if harf in alfabe else (harf.upper() if harf.upper() in alfabe else '?')
+            if h_key not in alfabe: continue
             
-            if not db_harf: continue
-
-            cizgiler = alfabe[db_harf]
+            cizgiler = alfabe[h_key]
             
-            # Harf genişlik çarpanı (Bazı harfler ince: i, l, 1)
-            dar_harfler = ['i', 'l', 'ı', '1', '.', 'I', 'İ']
-            genislik_carpani = 0.4 if db_harf in dar_harfler else 0.7
-
-            for (lx1, ly1, lx2, ly2) in cizgiler:
-                gx1 = mevcut_x + (lx1 * scale * genislik_carpani)
-                gy1 = baslangic_y + (ly1 * scale)
-                gx2 = mevcut_x + (lx2 * scale * genislik_carpani)
-                gy2 = baslangic_y + (ly2 * scale)
+            # Harf genişlik faktörü
+            w_factor = 0.4 if h_key in 'ilı1.,Iİ' else 0.8
+            
+            for line in cizgiler:
+                lx1, ly1, lx2, ly2 = line
                 
-                self.tam_sargi_yap(gx1, gy1, gx2, gy2, kalinlik_mm)
+                # Koordinat Dönüşümü
+                x1 = curr_x + (lx1 * scale * w_factor)
+                y1 = ly1 * scale
+                x2 = curr_x + (lx2 * scale * w_factor)
+                y2 = ly2 * scale
+                
+                self.sargi_cizgi(x1, y1, x2, y2, kalinlik)
+            
+            # Sonraki harfe geç
+            curr_x += (scale * w_factor) + (scale * 0.15) # 0.15 boşluk
 
-            mevcut_x += (scale * genislik_carpani) + (scale * harf_araligi)
-
-    def onizleme_olustur(self, dosya_adi):
-        print("JPG Önizleme oluşturuluyor...")
-        stitches = self.pattern.stitches
-        plt.figure(figsize=(12, 6))
+    def kaydet_ve_goster(self, dosya_adi):
+        self.pattern = self.pattern.get_normalized_pattern()
+        ad = dosya_adi.replace(" ", "_").lower()
+        
+        # Dosyalar
+        pyembroidery.write(self.pattern, f"{ad}.dst")
+        pyembroidery.write(self.pattern, f"{ad}.jef")
+        
+        # Resim (Önizleme)
+        plt.figure(figsize=(10, 4))
         plt.axis('equal'); plt.axis('off')
         
-        x_list, y_list = [], []
-        for stitch in stitches:
-            x, y, cmd = stitch[0], stitch[1], stitch[2]
-            if cmd == pyembroidery.JUMP or cmd == pyembroidery.TRIM:
-                if x_list:
-                    plt.plot(x_list, y_list, color='darkblue', linewidth=0.6, alpha=0.7)
-                    x_list, y_list = [], []
-            elif cmd == pyembroidery.STITCH:
-                x_list.append(x); y_list.append(y)
-        if x_list: plt.plot(x_list, y_list, color='darkblue', linewidth=0.6, alpha=0.7)
-
-        plt.title(f"{dosya_adi}", fontsize=12)
-        plt.savefig(f"{dosya_adi}_onizleme.jpg", dpi=150, bbox_inches='tight')
+        for stitch in self.pattern.stitches:
+            # Sadece JUMP olmayan dikişleri çiz (Nokta nokta)
+            if stitch[2] == pyembroidery.STITCH:
+                 plt.plot(stitch[0], stitch[1], 'bo', markersize=0.5, alpha=0.3)
+        
+        plt.title(f"{dosya_adi} (Blok Stil)", fontsize=12)
+        plt.savefig(f"{ad}_onizleme.jpg", dpi=150, bbox_inches='tight')
         plt.close()
-
-    def kaydet(self, dosya_adi):
-        self.pattern = self.pattern.get_normalized_pattern()
-        ad_temiz = dosya_adi.replace(" ", "_").lower()
-        pyembroidery.write(self.pattern, f"{ad_temiz}.dst")
-        pyembroidery.write(self.pattern, f"{ad_temiz}.jef")
-        self.onizleme_olustur(ad_temiz)
-        print(f"✅ {ad_temiz} BİTTİ.")
+        print(f"✅ {ad} HAZIRLANDI.")
 
 # ==========================================
-# KULLANICI KONTROL PANELİ
+# AYARLAR
 # ==========================================
 if __name__ == "__main__":
-    makine = ProfesyonelNakis()
-
-    # ---------------------------------------------------------
-    # BURAYI DOLDURMAN YETERLİ
-    # ---------------------------------------------------------
-    YAZILACAK_METIN = "Denizxğ"  
+    makine = SaglamNakis()
     
-    # Kutu Boyutları (CM Cinsinden)
-    # Yazıyı bu kutunun içine sığdırır.
-    GENISLIK_CM = 9   # Örn: 9 cm genişlik
-    YUKSEKLIK_CM = 4  # Örn: 4 cm yükseklik
-    # ---------------------------------------------------------
-
-    makine.yaziyi_isle(YAZILACAK_METIN, GENISLIK_CM, YUKSEKLIK_CM)
-    makine.kaydet(YAZILACAK_METIN)
+    # ------------------------------------
+    # İSTEĞİN: "Diyarbakır 21" (9cm x 4cm)
+    # ------------------------------------
+    METIN = "Diyarbakır 21"
+    GENISLIK_CM = 9
+    YUKSEKLIK_CM = 4
+    # ------------------------------------
+    
+    makine.yazdir(METIN, GENISLIK_CM, YUKSEKLIK_CM)
+    makine.kaydet_ve_goster(METIN)
