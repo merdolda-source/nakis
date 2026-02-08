@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-PNG → Nakış (DST/JEF) — DÜZGÜN ÇALIŞAN VERSİYON
-Sorun: JPG'de görünüp makinede boş çıkma - DÜZELTİLDİ
+TATLI DURAĞI LOGO - ÇOK RENKLİ NAKİŞ
+Makineye zarar vermez - Güvenli ayarlar
 """
 
 import math
@@ -14,95 +14,141 @@ from PIL import Image
 try:
     import cv2
 except ImportError as e:
-    raise ImportError("OpenCV kurun: pip install opencv-python-headless") from e
+    raise ImportError("pip install opencv-python-headless") from e
 
 
 class LogoNakis:
     def __init__(self):
-        self.pattern = None
-        self.stitches = []  # Tüm dikişleri önce buraya topluyoruz
+        self.pattern = pyembroidery.EmbPattern()
+        self.current_color_index = 0
         
     def _mesafe(self, x1, y1, x2, y2):
         return math.hypot(x2 - x1, y2 - y1)
 
-    def _resample_polyline(self, pts, step):
-        if len(pts) < 2 or step <= 0:
+    def _resample(self, pts, step):
+        """Noktaları eşit aralıklarla örnekle"""
+        if len(pts) < 2:
             return pts
         res = [pts[0]]
         for i in range(1, len(pts)):
-            x0, y0 = pts[i - 1]
+            x0, y0 = pts[i-1]
             x1, y1 = pts[i]
-            seg = self._mesafe(x0, y0, x1, y1)
-            if seg < 1e-6:
+            d = self._mesafe(x0, y0, x1, y1)
+            if d < 0.5:
                 continue
-            num_points = max(1, int(seg / step))
-            for j in range(1, num_points + 1):
-                t = j / num_points
-                nx = x0 + (x1 - x0) * t
-                ny = y0 + (y1 - y0) * t
-                res.append((nx, ny))
+            n = max(1, int(d / step))
+            for j in range(1, n + 1):
+                t = j / n
+                res.append((x0 + (x1-x0)*t, y0 + (y1-y0)*t))
         return res
 
-    def _add_stitch(self, x, y, cmd="stitch"):
-        """Dikişi listeye ekle"""
-        self.stitches.append((float(x), float(y), cmd))
+    def _add_thread(self, color_hex, name):
+        """Yeni iplik rengi ekle"""
+        self.pattern.add_thread({
+            "color": color_hex,
+            "name": name
+        })
 
-    def _add_move(self, x, y):
-        """Atlama ekle"""
-        self.stitches.append((float(x), float(y), "move"))
+    def _color_change(self):
+        """Renk değiştir"""
+        self.pattern.add_command(pyembroidery.COLOR_CHANGE)
+        self.current_color_index += 1
 
-    def _stitch_line(self, pts):
-        """Bir çizgiyi dik - İLK NOKTAYA MOVE, GERİSİ STITCH"""
+    def _safe_stitch(self, x, y, last_x, last_y, first=False):
+        """Güvenli dikiş - maksimum 12.1mm atlama"""
+        MAX_JUMP = 121  # 12.1mm = 121 unit (0.1mm)
+        
+        x = int(round(x))
+        y = int(round(y))
+        
+        if first:
+            self.pattern.add_stitch_absolute(pyembroidery.STITCH, x, y)
+            return x, y
+        
+        dist = self._mesafe(last_x, last_y, x, y)
+        
+        if dist > MAX_JUMP:
+            # Uzun mesafe = TRIM + JUMP
+            self.pattern.add_command(pyembroidery.TRIM)
+            
+            # Ara noktalar ekle
+            steps = int(dist / MAX_JUMP) + 1
+            for i in range(1, steps):
+                t = i / steps
+                mx = int(last_x + (x - last_x) * t)
+                my = int(last_y + (y - last_y) * t)
+                self.pattern.add_stitch_absolute(pyembroidery.JUMP, mx, my)
+            
+            self.pattern.add_stitch_absolute(pyembroidery.JUMP, x, y)
+            self.pattern.add_stitch_absolute(pyembroidery.STITCH, x, y)
+        elif dist > 30:  # 3mm üzeri = jump
+            self.pattern.add_stitch_absolute(pyembroidery.JUMP, x, y)
+            self.pattern.add_stitch_absolute(pyembroidery.STITCH, x, y)
+        else:
+            self.pattern.add_stitch_absolute(pyembroidery.STITCH, x, y)
+        
+        return x, y
+
+    def _stitch_outline(self, pts, last_pos):
+        """Kontur dik"""
         if len(pts) < 2:
-            return
+            return last_pos
         
-        # İlk noktaya atla
-        self._add_move(pts[0][0], pts[0][1])
+        lx, ly = last_pos
         
-        # Geri kalan noktaları dik
+        # İlk noktaya git
+        lx, ly = self._safe_stitch(pts[0][0], pts[0][1], lx, ly)
+        
+        # Kontur boyunca dik
         for i in range(1, len(pts)):
-            self._add_stitch(pts[i][0], pts[i][1])
-
-    def _ciz_outline(self, contours, transform):
-        """Konturları çiz"""
-        min_x, min_y, src_w, src_h, scale, ox, oy, step = transform
+            lx, ly = self._safe_stitch(pts[i][0], pts[i][1], lx, ly)
         
-        for cnt in contours:
-            if len(cnt) < 3:
+        return (lx, ly)
+
+    def _stitch_satin(self, pts, width, last_pos):
+        """Saten dikiş - kalın çizgiler için"""
+        if len(pts) < 2:
+            return last_pos
+        
+        lx, ly = last_pos
+        half_w = width / 2
+        
+        for i in range(len(pts) - 1):
+            x0, y0 = pts[i]
+            x1, y1 = pts[i + 1]
+            
+            # Dik yön hesapla
+            dx = x1 - x0
+            dy = y1 - y0
+            length = math.hypot(dx, dy)
+            if length < 0.1:
                 continue
             
-            # Basitleştir
-            approx = cv2.approxPolyDP(cnt, epsilon=1.0, closed=True)
-            if len(approx) < 3:
-                continue
+            # Normal vektör
+            nx = -dy / length * half_w
+            ny = dx / length * half_w
+            
+            # Saten zigzag
+            lx, ly = self._safe_stitch(x0 + nx, y0 + ny, lx, ly)
+            lx, ly = self._safe_stitch(x0 - nx, y0 - ny, lx, ly)
+        
+        return (lx, ly)
 
-            pts_img = [(p[0][0], p[0][1]) for p in approx]
-            pts_img.append(pts_img[0])  # Kapat
-
-            # Piksel → nakış
-            pts_emb = []
-            for x, y in pts_img:
-                ex = ox + (x - min_x) * scale
-                ey = oy + (src_h - (y - min_y)) * scale
-                pts_emb.append((ex, ey))
-
-            # Örnekle ve dik
-            pts_emb = self._resample_polyline(pts_emb, step)
-            if len(pts_emb) >= 2:
-                self._stitch_line(pts_emb)
-
-    def _ciz_hatch(self, mask, transform):
-        """Dolgu çiz - ZIGZAG PATTERN"""
-        min_x, min_y, src_w, src_h, scale, ox, oy, step = transform
+    def _stitch_fill(self, mask, bbox, scale, offset, step_mm=0.8):
+        """Dolgu dikiş - zigzag tarama"""
+        min_x, min_y, src_w, src_h = bbox
+        ox, oy = offset
         
         h, w = mask.shape
-        hatch_px = max(2, int(8 / scale))  # Satır aralığı
+        step_px = max(2, int(step_mm * 10 / scale))  # Satır aralığı
         
-        rows_data = []
+        last_pos = None
+        direction = 1
         
-        # Tüm satırları tara
-        for row in range(0, h, hatch_px):
+        for row in range(0, h, step_px):
             line = mask[row, :]
+            
+            # Segmentleri bul
             segments = []
             inside = False
             start = 0
@@ -113,217 +159,259 @@ class LogoNakis:
                     start = col
                 elif line[col] == 0 and inside:
                     inside = False
-                    if col - 1 > start:
-                        segments.append((start, col - 1))
+                    if col > start + 2:
+                        segments.append((start, col))
+            if inside and w > start + 2:
+                segments.append((start, w))
             
-            if inside and w - 1 > start:
-                segments.append((start, w - 1))
+            if not segments:
+                continue
             
-            if segments:
-                rows_data.append((row, segments))
-        
-        # Zigzag için yön
-        direction = 1
-        
-        for row, segments in rows_data:
-            for seg in segments:
-                x0, x1 = seg
-                
-                if direction < 0:
-                    x0, x1 = x1, x0
-                
-                # Piksel → nakış
+            # Zigzag yönü
+            if direction < 0:
+                segments = segments[::-1]
+                segments = [(s[1], s[0]) for s in segments]
+            
+            for x0, x1 in segments:
+                # Piksel → nakış koordinatı
                 ex0 = ox + (x0 - min_x) * scale
-                ey = oy + (src_h - (row - min_y)) * scale
                 ex1 = ox + (x1 - min_x) * scale
+                ey = oy + (src_h - (row - min_y)) * scale
                 
                 pts = [(ex0, ey), (ex1, ey)]
-                pts = self._resample_polyline(pts, step)
+                pts = self._resample(pts, 25)  # 2.5mm
                 
-                if len(pts) >= 2:
-                    self._stitch_line(pts)
+                if last_pos is None:
+                    last_pos = self._safe_stitch(pts[0][0], pts[0][1], 0, 0, first=True)
+                
+                last_pos = self._stitch_outline(pts, last_pos)
             
             direction *= -1
+        
+        return last_pos
+
+    def _extract_color(self, img_rgb, color_lower, color_upper):
+        """Belirli renk aralığını çıkar"""
+        hsv = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2HSV)
+        mask = cv2.inRange(hsv, color_lower, color_upper)
+        
+        # Temizle
+        kernel = np.ones((3, 3), np.uint8)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+        
+        return mask
 
     def logo_isle(
         self,
         image_path="logo.png",
-        genislik=10,
-        yukseklik=10,
-        birim="cm",
-        threshold=128,
-        outline=True,
-        fill=True,
-        stitch_len_mm=2.5,
-        invert=False,
+        genislik_cm=15,
+        yukseklik_cm=10,
     ):
-        # Sıfırla
-        self.stitches = []
+        """Logo işle - 3 renk ayrı"""
         
-        # Birim
-        k = 100 if birim == "cm" else 10
-        target_w = genislik * k
-        target_h = yukseklik * k
+        print(f"\n{'='*60}")
+        print(f"🎨 TATLI DURAĞI LOGO NAKİŞ")
+        print(f"{'='*60}")
         
-        # Görüntü
-        print(f"\n{'='*50}")
-        print(f"📂 Dosya: {image_path}")
+        # Görüntü yükle
+        img = Image.open(image_path).convert("RGB")
+        img_rgb = np.array(img)
         
-        img = Image.open(image_path).convert("L")
-        arr = np.array(img)
-        print(f"📐 Boyut: {arr.shape[1]}x{arr.shape[0]} px")
+        print(f"📐 Görüntü: {img_rgb.shape[1]}x{img_rgb.shape[0]} px")
         
-        # Binary
-        if threshold is None:
-            _, binary = cv2.threshold(arr, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-        else:
-            _, binary = cv2.threshold(arr, threshold, 255, cv2.THRESH_BINARY_INV)
-        
-        if invert:
-            binary = 255 - binary
-        
-        # Temizle
-        kernel = np.ones((2, 2), np.uint8)
-        binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
-        
-        # Kontur
-        contours, _ = cv2.findContours(binary, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-        
-        if not contours:
-            print("❌ Kontur bulunamadı!")
-            return
-        
-        print(f"🔍 {len(contours)} kontur bulundu")
-        
-        # Bbox
-        all_pts = [(p[0][0], p[0][1]) for c in contours for p in c]
-        min_x = min(p[0] for p in all_pts)
-        max_x = max(p[0] for p in all_pts)
-        min_y = min(p[1] for p in all_pts)
-        max_y = max(p[1] for p in all_pts)
-        src_w = max(1, max_x - min_x)
-        src_h = max(1, max_y - min_y)
+        # Hedef boyut (0.1mm biriminde)
+        target_w = genislik_cm * 100
+        target_h = yukseklik_cm * 100
         
         # Ölçek
-        scale = min(target_w / src_w, target_h / src_h)
-        ox = (target_w - src_w * scale) / 2
-        oy = (target_h - src_h * scale) / 2
+        h, w = img_rgb.shape[:2]
+        scale = min(target_w / w, target_h / h)
+        ox = (target_w - w * scale) / 2
+        oy = (target_h - h * scale) / 2
         
-        step = stitch_len_mm * 10  # mm → 0.1mm
+        bbox = (0, 0, w, h)
+        offset = (ox, oy)
         
-        transform = (min_x, min_y, src_w, src_h, scale, ox, oy, step)
-        
+        print(f"📏 Hedef: {genislik_cm}x{yukseklik_cm} cm")
         print(f"📏 Ölçek: {scale:.4f}")
-        print(f"📦 Hedef: {genislik}x{yukseklik} {birim}")
-        print(f"🧵 Dikiş: {stitch_len_mm} mm")
+        
+        # ═══════════════════════════════════════════════════════════
+        # RENK 1: ALTIN/SARI SÜSLEMELER
+        # ═══════════════════════════════════════════════════════════
+        print(f"\n🟡 Renk 1: Altın süslemeler...")
+        
+        self._add_thread(0xD4A84B, "Gold")
+        
+        # Sarı/Altın renk aralığı (HSV)
+        gold_lower = np.array([15, 80, 120])
+        gold_upper = np.array([35, 255, 255])
+        gold_mask = self._extract_color(img_rgb, gold_lower, gold_upper)
+        
+        # Konturları bul
+        contours, _ = cv2.findContours(gold_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        print(f"   {len(contours)} kontur bulundu")
+        
+        last_pos = None
+        
+        for cnt in contours:
+            if cv2.contourArea(cnt) < 50:  # Çok küçükleri atla
+                continue
+            
+            # Basitleştir
+            approx = cv2.approxPolyDP(cnt, 2.0, True)
+            if len(approx) < 3:
+                continue
+            
+            # Koordinat dönüşümü
+            pts = []
+            for p in approx:
+                px, py = p[0]
+                ex = ox + px * scale
+                ey = oy + (h - py) * scale
+                pts.append((ex, ey))
+            pts.append(pts[0])  # Kapat
+            
+            pts = self._resample(pts, 25)  # 2.5mm
+            
+            if last_pos is None:
+                last_pos = self._safe_stitch(pts[0][0], pts[0][1], 0, 0, first=True)
+            
+            last_pos = self._stitch_outline(pts, last_pos)
         
         # Dolgu
-        if fill:
-            print("⏳ Dolgu oluşturuluyor...")
-            self._ciz_hatch(binary, transform)
+        last_pos = self._stitch_fill(gold_mask, bbox, scale, offset, step_mm=0.6)
         
-        # Kontur
-        if outline:
-            print("⏳ Kontur oluşturuluyor...")
-            self._ciz_outline(contours, transform)
+        # ═══════════════════════════════════════════════════════════
+        # RENK 2: KIRMIZI ZEMIN
+        # ═══════════════════════════════════════════════════════════
+        print(f"\n🔴 Renk 2: Kırmızı zemin...")
         
-        print(f"✅ Toplam {len(self.stitches)} nokta")
-        print(f"{'='*50}\n")
-
-    def _build_pattern(self):
-        """Dikişleri pyembroidery pattern'e çevir"""
-        self.pattern = pyembroidery.EmbPattern()
+        self._color_change()
+        self._add_thread(0x8B1A1A, "Dark Red")
         
-        # İplik
-        self.pattern.add_thread({
-            "color": 0x000000,
-            "name": "Black"
-        })
+        # Kırmızı renk aralığı
+        red_lower1 = np.array([0, 80, 50])
+        red_upper1 = np.array([10, 255, 255])
+        red_lower2 = np.array([160, 80, 50])
+        red_upper2 = np.array([180, 255, 255])
         
-        if not self.stitches:
-            print("❌ Dikiş yok!")
-            return
+        hsv = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2HSV)
+        red_mask1 = cv2.inRange(hsv, red_lower1, red_upper1)
+        red_mask2 = cv2.inRange(hsv, red_lower2, red_upper2)
+        red_mask = cv2.bitwise_or(red_mask1, red_mask2)
         
-        # İlk nokta
-        first = self.stitches[0]
-        self.pattern.add_stitch_absolute(
-            pyembroidery.STITCH,
-            int(round(first[0])),
-            int(round(first[1]))
-        )
+        kernel = np.ones((3, 3), np.uint8)
+        red_mask = cv2.morphologyEx(red_mask, cv2.MORPH_CLOSE, kernel)
         
-        last_x, last_y = first[0], first[1]
-        stitch_count = 0
-        jump_count = 0
+        contours, _ = cv2.findContours(red_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        print(f"   {len(contours)} kontur bulundu")
         
-        for i in range(1, len(self.stitches)):
-            x, y, cmd = self.stitches[i]
-            x = int(round(x))
-            y = int(round(y))
+        # Dolgu
+        last_pos = self._stitch_fill(red_mask, bbox, scale, offset, step_mm=0.7)
+        
+        # ═══════════════════════════════════════════════════════════
+        # RENK 3: BEYAZ YAZI
+        # ═══════════════════════════════════════════════════════════
+        print(f"\n⚪ Renk 3: Beyaz yazı...")
+        
+        self._color_change()
+        self._add_thread(0xFFFFFF, "White")
+        
+        # Beyaz renk aralığı
+        white_lower = np.array([0, 0, 200])
+        white_upper = np.array([180, 30, 255])
+        white_mask = self._extract_color(img_rgb, white_lower, white_upper)
+        
+        contours, _ = cv2.findContours(white_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        print(f"   {len(contours)} kontur bulundu")
+        
+        for cnt in contours:
+            if cv2.contourArea(cnt) < 30:
+                continue
             
-            dist = self._mesafe(last_x, last_y, x, y)
+            approx = cv2.approxPolyDP(cnt, 1.5, True)
+            if len(approx) < 3:
+                continue
             
-            if cmd == "move" or dist > 100:  # 10mm'den uzak = jump
-                self.pattern.add_stitch_absolute(pyembroidery.JUMP, x, y)
-                jump_count += 1
-            else:
-                self.pattern.add_stitch_absolute(pyembroidery.STITCH, x, y)
-                stitch_count += 1
+            pts = []
+            for p in approx:
+                px, py = p[0]
+                ex = ox + px * scale
+                ey = oy + (h - py) * scale
+                pts.append((ex, ey))
+            pts.append(pts[0])
             
-            last_x, last_y = x, y
+            pts = self._resample(pts, 20)  # 2mm - yazı için daha ince
+            
+            if last_pos is None:
+                last_pos = self._safe_stitch(pts[0][0], pts[0][1], 0, 0, first=True)
+            
+            # Saten dikiş - yazı için
+            last_pos = self._stitch_satin(pts, 15, last_pos)  # 1.5mm genişlik
         
         # Bitir
-        self.pattern.add_stitch_absolute(pyembroidery.END, int(last_x), int(last_y))
+        self.pattern.add_command(pyembroidery.TRIM)
+        self.pattern.add_command(pyembroidery.END)
         
-        print(f"📊 Pattern: {stitch_count} dikiş, {jump_count} atlama")
+        # İstatistik
+        stats = self.pattern.count_stitches()
+        print(f"\n{'='*60}")
+        print(f"📊 ÖZET")
+        print(f"   Toplam dikiş: {stats}")
+        print(f"   Renk sayısı: 3")
+        print(f"{'='*60}")
 
     def onizleme(self, ad):
         """Önizleme kaydet"""
-        if not self.stitches:
-            print("❌ Önizleme için dikiş yok!")
-            return
-            
-        plt.figure(figsize=(12, 12))
-        plt.axis("equal")
-        plt.axis("off")
+        fig, ax = plt.subplots(figsize=(14, 10))
+        ax.set_aspect('equal')
+        ax.axis('off')
+        
+        colors = ['#D4A84B', '#8B1A1A', '#FFFFFF']
+        color_idx = 0
         
         xs, ys = [], []
         
-        for i, (x, y, cmd) in enumerate(self.stitches):
-            if cmd == "move":
-                if len(xs) > 1:
-                    plt.plot(xs, ys, 'b-', linewidth=0.5, alpha=0.8)
+        for stitch in self.pattern.stitches:
+            x, y, cmd = stitch
+            
+            if cmd == pyembroidery.COLOR_CHANGE:
+                if xs:
+                    ax.plot(xs, ys, color=colors[color_idx % 3], linewidth=0.5, alpha=0.8)
+                xs, ys = [], []
+                color_idx += 1
+            elif cmd == pyembroidery.TRIM or cmd == pyembroidery.JUMP:
+                if xs:
+                    ax.plot(xs, ys, color=colors[color_idx % 3], linewidth=0.5, alpha=0.8)
                 xs, ys = [x], [y]
-            else:
+            elif cmd == pyembroidery.STITCH:
                 xs.append(x)
                 ys.append(y)
+            elif cmd == pyembroidery.END:
+                if xs:
+                    ax.plot(xs, ys, color=colors[color_idx % 3], linewidth=0.5, alpha=0.8)
         
-        if len(xs) > 1:
-            plt.plot(xs, ys, 'b-', linewidth=0.5, alpha=0.8)
+        if xs:
+            ax.plot(xs, ys, color=colors[color_idx % 3], linewidth=0.5, alpha=0.8)
         
-        plt.title(f"{ad} - {len(self.stitches)} nokta", fontsize=14)
-        plt.savefig(f"{ad}_preview.jpg", dpi=200, bbox_inches="tight")
+        ax.set_facecolor('black')
+        fig.patch.set_facecolor('black')
+        
+        plt.title(f"{ad} - Nakış Önizleme", color='white', fontsize=14)
+        plt.savefig(f"{ad}_preview.png", dpi=200, bbox_inches='tight', 
+                    facecolor='black', edgecolor='none')
         plt.close()
-        print(f"🖼️  Önizleme: {ad}_preview.jpg")
+        print(f"🖼️  Önizleme: {ad}_preview.png")
 
     def kaydet(self, isim):
-        """DST ve JEF kaydet"""
-        if not self.stitches:
-            print("❌ Kaydedilecek dikiş yok!")
-            return
-        
+        """Dosyaları kaydet"""
         ad = isim.replace(" ", "_").lower()
-        
-        # Pattern oluştur
-        self._build_pattern()
-        
-        if self.pattern is None:
-            return
         
         # Önizleme
         self.onizleme(ad)
         
-        # Normalize et (ÖNEMLİ!)
+        # Normalize
         self.pattern = self.pattern.get_normalized_pattern()
         
         # DST
@@ -331,31 +419,30 @@ class LogoNakis:
             pyembroidery.write_dst(self.pattern, f"{ad}.dst")
             print(f"💾 DST: {ad}.dst")
         except Exception as e:
-            print(f"❌ DST hatası: {e}")
+            print(f"❌ DST: {e}")
         
-        # JEF
+        # JEF (Janome)
         try:
             pyembroidery.write_jef(self.pattern, f"{ad}.jef")
             print(f"💾 JEF: {ad}.jef")
         except Exception as e:
-            print(f"❌ JEF hatası: {e}")
+            print(f"❌ JEF: {e}")
         
-        # PES
+        # PES (Brother)
         try:
             pyembroidery.write_pes(self.pattern, f"{ad}.pes")
             print(f"💾 PES: {ad}.pes")
         except Exception as e:
-            print(f"❌ PES hatası: {e}")
+            print(f"❌ PES: {e}")
         
         # EXP (Melco)
         try:
             pyembroidery.write_exp(self.pattern, f"{ad}.exp")
             print(f"💾 EXP: {ad}.exp")
         except Exception as e:
-            print(f"❌ EXP hatası: {e}")
+            print(f"❌ EXP: {e}")
         
         print(f"\n✅ TAMAMLANDI!")
-        print(f"📁 Dosyalar: {ad}.dst, {ad}.jef, {ad}.pes, {ad}.exp")
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -363,31 +450,16 @@ if __name__ == "__main__":
     
     m = LogoNakis()
     
-    # ══════════ AYARLAR ══════════
-    LOGO = "logo.png"
-    
-    GENISLIK = 10      # cm
-    YUKSEKLIK = 10     # cm
-    
-    THRESHOLD = 128    # 0-255 (None = otomatik)
-    INVERT = False     # True = renkleri tersle
-    
-    DOLGU = True       # İç dolgu
-    KONTUR = True      # Dış çizgi
-    
-    DIKIŞ_MM = 2.5     # Dikiş uzunluğu (mm)
-    # ═════════════════════════════
+    # ═══════════ AYARLAR ═══════════
+    LOGO = "logo.png"          # Logo dosyası
+    GENISLIK = 15              # cm
+    YUKSEKLIK = 10             # cm
+    # ═══════════════════════════════
     
     m.logo_isle(
         image_path=LOGO,
-        genislik=GENISLIK,
-        yukseklik=YUKSEKLIK,
-        birim="cm",
-        threshold=THRESHOLD,
-        outline=KONTUR,
-        fill=DOLGU,
-        stitch_len_mm=DIKIŞ_MM,
-        invert=INVERT,
+        genislik_cm=GENISLIK,
+        yukseklik_cm=YUKSEKLIK,
     )
     
-    m.kaydet("logo")
+    m.kaydet("tatli_duragi")
