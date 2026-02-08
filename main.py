@@ -1,11 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-PNG → Nakış (DST/JEF) – Dolgu + kontur, renk değişimi
-- Arka plan ve çok büyük alanlı (alt tabaka) kümeler atlanır
-- Siyah (ve isterseniz beyaz) otomatik atlanır
-- TRIM yok, segmentler arası JUMP; kısa tie-in/out
-- Dolgu taraması sıklaştırılmış
+PNG → Nakış (DST/JEF) – Siyah arka planı otomatik atla, sadece desene odaklan
+Tatlı Durağı logosu için optimize edilmiş versiyon.
 
 Gerekenler:
     pip install pyembroidery pillow numpy opencv-python-headless matplotlib
@@ -23,27 +20,51 @@ except ImportError as e:
     raise ImportError("OpenCV yok. Kurun: pip install opencv-python-headless") from e
 
 
-# Basit iplik paleti (RGB). Dilerseniz değiştirin.
+# Tatlı Durağı logosu için özel iplik paleti (Kırmızı, Altın, Beyaz)
 THREAD_PALETTE = [
-    ("Gold",   (220, 180, 60)),
-    ("White",  (255, 255, 255)),
-    ("Red",    (200, 0, 0)),
-    ("Blue",   (0, 70, 200)),
-    ("Green",  (0, 150, 0)),
-    ("Yellow", (230, 200, 0)),
-    ("Black",  (0, 0, 0)),
+    ("DarkRed",    (139, 0, 0)),       # Koyu kırmızı - ana zemin
+    ("Gold",       (218, 165, 32)),    # Altın - süslemeler ve çerçeve
+    ("White",      (255, 255, 255)),   # Beyaz - yazı
+    ("Maroon",     (128, 0, 0)),       # Bordo - detaylar
+    ("DarkGold",   (184, 134, 11)),    # Koyu altın
 ]
 
 
 def set_thread_color(thread: pyembroidery.EmbThread, rgb):
+    """pyembroidery sürümleri için renk ataması."""
     r, g, b = rgb
-    try:
-        thread.set_color(r, g, b)
-    except Exception:
-        thread.red = r
-        thread.green = g
-        thread.blue = b
-        thread.color = (int(r) << 16) | (int(g) << 8) | int(b)
+    if hasattr(thread, "set_color"):
+        try:
+            thread.set_color(r, g, b)
+            return
+        except Exception:
+            pass
+    thread.red = r
+    thread.green = g
+    thread.blue = b
+    thread.color = (int(r) << 16) | (int(g) << 8) | int(b)
+
+
+def is_black_or_dark(rgb, threshold=50):
+    """Bir rengin siyah/çok koyu olup olmadığını kontrol et."""
+    return np.mean(rgb) <= threshold
+
+
+def color_distance(c1, c2):
+    """İki renk arasındaki Öklid mesafesi."""
+    return np.sqrt(np.sum((np.array(c1, dtype=float) - np.array(c2, dtype=float)) ** 2))
+
+
+def find_best_thread(rgb, palette):
+    """Verilen RGB için en yakın iplik rengini bul."""
+    best_idx = 0
+    best_dist = float('inf')
+    for i, (name, pal_rgb) in enumerate(palette):
+        dist = color_distance(rgb, pal_rgb)
+        if dist < best_dist:
+            best_dist = dist
+            best_idx = i
+    return best_idx
 
 
 class LogoNakis:
@@ -52,6 +73,7 @@ class LogoNakis:
 
     # ---------- yardımcılar ----------
     def _resample(self, pts, step):
+        """Noktaları belirli adım aralığında yeniden örnekle."""
         if len(pts) < 2 or step <= 0:
             return pts
         out = [pts[0]]
@@ -82,17 +104,20 @@ class LogoNakis:
     def _stitch(self, x, y):
         self.pattern.add_stitch_absolute(pyembroidery.STITCH, int(x), int(y))
 
+    def _trim(self, x, y):
+        self.pattern.add_stitch_absolute(pyembroidery.TRIM, int(x), int(y))
+
     def _color_change(self):
         self.pattern.add_command(pyembroidery.COLOR_CHANGE)
 
-    # ---------- tie-in / tie-out (kısa, trimsiz) ----------
-    def _tie_in(self, pt, step=3):
+    # ---------- tie-in / tie-out ----------
+    def _tie_in(self, pt, step=4):
         x, y = pt
         self._stitch(x, y)
         self._stitch(x + step, y)
         self._stitch(x - step, y)
 
-    def _tie_out(self, pt, step=3):
+    def _tie_out(self, pt, step=4):
         x, y = pt
         self._stitch(x + step, y)
         self._stitch(x - step, y)
@@ -122,12 +147,12 @@ class LogoNakis:
             if len(pts_emb) < 2:
                 continue
 
-            # trimsiz: jump + tie + kontur, sonra tie-out
             self._jump(*pts_emb[0])
-            self._tie_in(pts_emb[0], step=3)
+            self._tie_in(pts_emb[0], step=4)
             for p in pts_emb[1:]:
                 self._stitch(*p)
-            self._tie_out(pts_emb[-1], step=3)
+            self._tie_out(pts_emb[-1], step=4)
+            self._trim(*pts_emb[-1])
             total += len(pts_emb)
         return total
 
@@ -136,6 +161,8 @@ class LogoNakis:
                     scale, ox, oy, hatch_step_px, stitch_step_emb):
         h, w = mask.shape
         total = 0
+        direction = 1  # Alternatif yön için
+        
         for row in range(0, h, hatch_step_px):
             line = mask[row, :]
             inside = False
@@ -152,84 +179,87 @@ class LogoNakis:
             if inside:
                 segs.append((start, w - 1))
 
+            # Alternatif yönde dikiş (daha düzgün dolgu)
+            if direction < 0:
+                segs = segs[::-1]
+                segs = [(x1, x0) for x0, x1 in segs]
+            direction *= -1
+
             for x0, x1 in segs:
-                if x1 <= x0:
+                if abs(x1 - x0) < 2:
                     continue
-                ex0 = ox + (x0 - min_x) * scale
+                ex0 = ox + (min(x0, x1) - min_x) * scale
                 ey0 = oy + (src_h - (row - min_y)) * scale
-                ex1 = ox + (x1 - min_x) * scale
+                ex1 = ox + (max(x0, x1) - min_x) * scale
                 ey1 = oy + (src_h - (row - min_y)) * scale
+                
                 pts = [(ex0, ey0), (ex1, ey1)]
                 pts = self._resample(pts, stitch_step_emb)
                 if len(pts) < 2:
                     continue
-
                 self._jump(*pts[0])
-                self._tie_in(pts[0], step=3)
+                self._tie_in(pts[0], step=4)
                 for p in pts[1:]:
                     self._stitch(*p)
-                self._tie_out(pts[-1], step=3)
+                self._tie_out(pts[-1], step=4)
+                self._trim(*pts[-1])
                 total += len(pts)
         return total
 
-    # ---------- renk kümelemesi + arka plan/alt tabaka atlama ----------
-    def _segment_colors(self, img_rgb, k,
-                        ignore_black=True, black_thresh=40,
-                        ignore_white=True, white_thresh=245,
-                        bg_mode="auto", max_area_fraction_skip=0.35):
+    # ---------- siyah arka planı otomatik algıla ve atla ----------
+    def _segment_colors_ignore_black(self, img_rgb, k, black_threshold=50):
         """
-        ignore_black: ortalama RGB <= black_thresh kümeleri atla.
-        ignore_white: ortalama RGB >= white_thresh kümeleri atla (beyaz zemin).
-        bg_mode: 'auto' -> en büyük alanlı küme arka plan,
-                 'darkest' -> en koyu küme,
-                 'brightest' -> en parlak küme.
-        max_area_fraction_skip: küme alanı toplamın bu oranından büyükse (alt tabaka) atla.
+        K-means ile renk segmentasyonu yap, siyah/koyu renkleri otomatik atla.
+        
+        Returns:
+            color_masks: [(cluster_idx, mask, area, center_rgb), ...]
+            bg_mask: arka plan maskesi
         """
         h, w, _ = img_rgb.shape
         data = img_rgb.reshape((-1, 3)).astype(np.float32)
-        criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 25, 1.0)
-        K = max(1, min(k, 8))
-        _, labels, centers = cv2.kmeans(data, K, None, criteria, 6, cv2.KMEANS_PP_CENTERS)
+        
+        # K-means kümeleme
+        criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 1.0)
+        K = max(2, min(k, 8))
+        _, labels, centers = cv2.kmeans(data, K, None, criteria, 10, cv2.KMEANS_PP_CENTERS)
         labels = labels.reshape((h, w))
         centers = centers.astype(np.uint8)
 
-        areas = [(int((labels == i).sum()), i) for i in range(K)]
-        areas_sorted = sorted(areas, reverse=True)
-        total_px = h * w
+        print(f"\n{'='*60}")
+        print(f"🎨 K-means Kümeleme Sonuçları (K={K})")
+        print(f"{'='*60}")
 
-        # Arka plan seçimi
-        if bg_mode == "auto":
-            bg_idx = areas_sorted[0][1]
-        elif bg_mode == "brightest":
-            bg_idx = int(np.argmax(centers.sum(axis=1)))
-        else:  # darkest
-            bg_idx = int(np.argmin(centers.sum(axis=1)))
+        # Her kümeyi analiz et
+        valid_masks = []
+        bg_mask = np.zeros((h, w), dtype=np.uint8)
+        
+        for i in range(K):
+            mask = (labels == i).astype(np.uint8) * 255
+            area = int(mask.sum() // 255)
+            center_rgb = centers[i].tolist()
+            brightness = np.mean(center_rgb)
+            
+            # Siyah/koyu mu kontrol et
+            is_dark = brightness <= black_threshold
+            
+            status = "⛔ ATLA (Siyah/Koyu)" if is_dark else "✅ KULLAN"
+            print(f"  Küme {i}: RGB={center_rgb}, Parlaklık={brightness:.1f}, Alan={area}px → {status}")
+            
+            if is_dark:
+                bg_mask |= mask
+            else:
+                if area > 100:  # Minimum alan filtresi
+                    valid_masks.append((i, mask, area, center_rgb))
+        
+        # Alana göre sırala (büyükten küçüğe)
+        valid_masks.sort(key=lambda x: x[2], reverse=True)
+        
+        print(f"\n📊 Toplam {len(valid_masks)} renk işlenecek")
+        print(f"{'='*60}\n")
+        
+        return valid_masks, bg_mask
 
-        center_mean = centers.mean(axis=1)
-        skip_set = set()
-
-        if ignore_black:
-            for i, m in enumerate(center_mean):
-                if m <= black_thresh:
-                    skip_set.add(i)
-
-        if ignore_white:
-            for i, m in enumerate(center_mean):
-                if m >= white_thresh:
-                    skip_set.add(i)
-
-        # Çok büyük alanlı (alt tabaka) kümeleri atla
-        for area, idx in areas_sorted:
-            frac = area / total_px
-            if frac >= max_area_fraction_skip:
-                skip_set.add(idx)
-
-        # işleme sırası: büyükten küçüğe, bg en sona
-        ordered = [i for _, i in areas_sorted if i != bg_idx] + [bg_idx]
-
-        return labels, centers, ordered, bg_idx, skip_set
-
-    # ---------- ana iş ----------
+    # ---------- ana işleme ----------
     def logo_isle(
         self,
         image_path="logo.png",
@@ -239,89 +269,74 @@ class LogoNakis:
         yukseklik=5,
         birim="cm",
         n_colors=4,
-        min_area_px=50,
+        min_area_px=100,
         outline=True,
         fill=True,
         hatch_step_mm=0.6,
         stitch_step_mm=0.5,
-        simplify_epsilon=0.35,
-        min_contour_len=2,
-        ignore_black=True,
-        black_thresh=40,
-        ignore_white=True,
-        white_thresh=245,
-        bg_mode="auto",
-        max_area_fraction_skip=0.35,  # alt tabakayı atmak için
+        simplify_epsilon=1.0,
+        min_contour_len=3,
+        black_threshold=50,
     ):
-        # Birim → emb (0.1 mm)
+        """
+        Logo görüntüsünü nakış desenine dönüştür.
+        Siyah arka plan otomatik algılanır ve atlanır.
+        """
+        # Birim dönüşümü (emb birimi = 0.1 mm)
         k = 100 if birim == "cm" else 10 if birim == "mm" else 100
         target_w = genislik * k
         target_h = yukseklik * k
         bx = baslangic_x * k
         by = baslangic_y * k
 
+        # Görüntüyü yükle
+        print(f"\n🖼️ Logo yükleniyor: {image_path}")
         img = Image.open(image_path).convert("RGB")
         rgb = np.array(img)
+        print(f"📐 Görüntü boyutu: {rgb.shape[1]} x {rgb.shape[0]} piksel")
 
-        labels, centers, ordered, bg_idx, skip_set = self._segment_colors(
-            rgb,
-            n_colors,
-            ignore_black=ignore_black,
-            black_thresh=black_thresh,
-            ignore_white=ignore_white,
-            white_thresh=white_thresh,
-            bg_mode=bg_mode,
-            max_area_fraction_skip=max_area_fraction_skip,
+        # Renk segmentasyonu (siyah otomatik atlanır)
+        color_masks, bg_mask = self._segment_colors_ignore_black(
+            rgb, n_colors, black_threshold=black_threshold
         )
 
-        print(f"🎨 Küme sayısı: {len(centers)}, arka plan: {bg_idx}")
-        if skip_set:
-            print(f"⛔ Atlanacak kümeler: {sorted(list(skip_set))} (koyu/siyah, çok açık/beyaz veya çok büyük alan)")
-
-        color_masks = []
-        for idx in ordered:
-            if idx == bg_idx:
-                print(f"⛔ Arka plan (küme {idx}) atlandı.")
-                continue
-            if idx in skip_set:
-                print(f"⛔ Küme {idx} atlandı.")
-                continue
-            mask = (labels == idx).astype(np.uint8) * 255
-            area = int(mask.sum() // 255)
-            if area < min_area_px:
-                print(f"⛔ Küme {idx} alan küçük ({area}px), atlandı.")
-                continue
-            color_masks.append((idx, mask, area))
-
         if not color_masks:
-            print("⚠️ Dikiş atılacak küme bulunamadı.")
+            print("⚠️ İşlenecek renk bulunamadı! Siyah eşiğini düşürmeyi deneyin.")
             return
 
-        combined = np.zeros_like(color_masks[0][1], dtype=np.uint8)
-        for _, mk, _ in color_masks:
+        # Sadece desen alanını hesapla (siyah hariç)
+        combined = np.zeros((rgb.shape[0], rgb.shape[1]), dtype=np.uint8)
+        for _, mk, _, _ in color_masks:
             combined |= (mk > 0).astype(np.uint8)
+        
         pts_y, pts_x = np.nonzero(combined)
+        if len(pts_y) == 0:
+            print("⚠️ Desen bulunamadı!")
+            return
+            
         min_x, max_x = pts_x.min(), pts_x.max()
         min_y, max_y = pts_y.min(), pts_y.max()
         src_w = max_x - min_x
         src_h = max_y - min_y
+        
         if src_w < 1 or src_h < 1:
-            print("⚠️ Görüntü boyutu geçersiz.")
+            print("⚠️ Desen boyutu geçersiz!")
             return
 
+        # Ölçekleme hesapla
         scale = min(target_w / src_w, target_h / src_h)
         ox = bx + (target_w - src_w * scale) / 2.0
         oy = by + (target_h - src_h * scale) / 2.0
 
-        print(f"🖼️ Logo: {image_path}")
-        print(f"📦 Hedef: {genislik} x {yukseklik} {birim}")
-        print(f"🔧 Ölçek: {scale / k:.2f} {birim}")
-        print(f"✂️ Trim YOK. Segmentler arası JUMP + kısa tie-in/out.")
+        print(f"\n📦 Hedef Boyut: {genislik} x {yukseklik} {birim}")
+        print(f"🔧 Desen Alanı: {src_w} x {src_h} piksel")
+        print(f"📏 Ölçek Faktörü: {scale:.4f}")
+        print(f"📍 Gerçek Boyut: {src_w * scale / k:.2f} x {src_h * scale / k:.2f} {birim}")
 
-        stitch_step_emb = max(1, stitch_step_mm * 10)  # mm → 0.1 mm
+        stitch_step_emb = max(1, stitch_step_mm * 10)
         hatch_step_px = max(1, int(round(hatch_step_mm * 10 / scale)))
 
-        # İplikleri ekle (algılanan renk sayısı kadar)
+        # İplikleri pattern'e ekle
         for i in range(min(len(THREAD_PALETTE), len(color_masks))):
             name, rgb_t = THREAD_PALETTE[i]
             th = pyembroidery.EmbThread()
@@ -330,20 +345,29 @@ class LogoNakis:
             th.catalog_number = name
             self.pattern.add_thread(th)
 
-        # Renk blokları
-        color_block = 0
-        for idx, mask, area in color_masks:
-            col_rgb = centers[idx].tolist()
-            name = THREAD_PALETTE[color_block % len(THREAD_PALETTE)][0]
-            print(f"🧵 Renk {color_block+1}: küme {idx}, alan {area}px, merkez {col_rgb}, iplik {name}")
+        print(f"\n🧵 Dikiş Başlıyor...")
+        print(f"{'='*60}")
 
-            if color_block > 0:
+        # Her renk için işle
+        total_stitches = 0
+        for color_idx, (cluster_idx, mask, area, center_rgb) in enumerate(color_masks):
+            # En yakın iplik rengini bul
+            thread_idx = find_best_thread(center_rgb, THREAD_PALETTE)
+            thread_name = THREAD_PALETTE[thread_idx][0]
+            
+            print(f"\n🎨 Renk {color_idx + 1}/{len(color_masks)}:")
+            print(f"   Küme: {cluster_idx}, RGB: {center_rgb}")
+            print(f"   İplik: {thread_name}, Alan: {area} piksel")
+
+            if color_idx > 0:
                 self._color_change()
 
+            # Konturları bul
             contours, _ = cv2.findContours(mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
 
+            # Dolgu dikiş
             n_fill = 0
-            if fill:
+            if fill and area >= min_area_px:
                 n_fill = self._draw_hatch(
                     mask=mask,
                     min_x=min_x,
@@ -357,6 +381,7 @@ class LogoNakis:
                     stitch_step_emb=stitch_step_emb,
                 )
 
+            # Kontur dikiş
             n_out = 0
             if outline:
                 n_out = self._draw_outline(
@@ -373,78 +398,119 @@ class LogoNakis:
                     min_len=min_contour_len,
                 )
 
-            print(f"   ➜ Dolgu dikiş: {n_fill}, Kontur dikiş: {n_out}")
-            color_block += 1
+            print(f"   ✅ Dolgu: {n_fill} dikiş, Kontur: {n_out} dikiş")
+            total_stitches += n_fill + n_out
 
         self.pattern.end()
+        
+        print(f"\n{'='*60}")
+        print(f"📊 TOPLAM: {total_stitches} dikiş")
+        print(f"{'='*60}")
 
     # ---------- önizleme ----------
     def onizleme(self, ad):
-        plt.figure(figsize=(10, 6))
+        """Dikiş deseninin önizlemesini oluştur."""
+        plt.figure(figsize=(12, 8))
         plt.axis("equal")
         plt.axis("off")
+        
+        colors = ['darkred', 'goldenrod', 'white', 'maroon', 'darkgoldenrod']
+        current_color_idx = 0
+        
         xs, ys = [], []
         for s in self.pattern.stitches:
             cmd = s[2]
-            if cmd in (pyembroidery.JUMP, pyembroidery.TRIM, pyembroidery.COLOR_CHANGE, pyembroidery.STOP):
+            if cmd == pyembroidery.COLOR_CHANGE:
                 if xs:
-                    plt.plot(xs, ys, color="navy", linewidth=0.6, alpha=0.9)
+                    plt.plot(xs, ys, color=colors[current_color_idx % len(colors)], 
+                            linewidth=0.5, alpha=0.8)
+                xs, ys = [], []
+                current_color_idx += 1
+            elif cmd in (pyembroidery.JUMP, pyembroidery.TRIM, pyembroidery.STOP):
+                if xs:
+                    plt.plot(xs, ys, color=colors[current_color_idx % len(colors)], 
+                            linewidth=0.5, alpha=0.8)
                 xs, ys = [], []
             elif cmd == pyembroidery.STITCH:
                 xs.append(s[0])
                 ys.append(s[1])
+        
         if xs:
-            plt.plot(xs, ys, color="navy", linewidth=0.6, alpha=0.9)
-        plt.title(ad, fontsize=12)
-        plt.savefig(f"{ad}.jpg", dpi=300, bbox_inches="tight")
+            plt.plot(xs, ys, color=colors[current_color_idx % len(colors)], 
+                    linewidth=0.5, alpha=0.8)
+        
+        plt.gca().set_facecolor('black')
+        plt.title(f"{ad} - Nakış Önizleme", fontsize=14, color='white')
+        plt.savefig(f"{ad}_preview.png", dpi=300, bbox_inches="tight", 
+                   facecolor='black', edgecolor='none')
         plt.close()
-        print(f"🖼️ Önizleme → {ad}.jpg")
+        print(f"\n🖼️ Önizleme kaydedildi: {ad}_preview.png")
 
     # ---------- kaydet ----------
     def kaydet(self, isim):
+        """Pattern'i DST ve JEF formatlarında kaydet."""
         self.pattern = self.pattern.get_normalized_pattern()
         ad = isim.replace(" ", "_").lower()
+        
+        # DST kaydet
         pyembroidery.write_dst(self.pattern, f"{ad}.dst")
+        print(f"💾 DST kaydedildi: {ad}.dst")
+        
+        # JEF kaydet
         pyembroidery.write_jef(self.pattern, f"{ad}.jef")
+        print(f"💾 JEF kaydedildi: {ad}.jef")
+        
+        # Önizleme oluştur
         self.onizleme(ad)
-        print(f"✅ Hazır: {ad}.dst  /  {ad}.jef")
+        
+        print(f"\n✅ İşlem tamamlandı!")
 
 
-# ------------------------------------------------------------
+# ============================================================
 # ÇALIŞTIRMA
-# ------------------------------------------------------------
+# ============================================================
 if __name__ == "__main__":
+    
     m = LogoNakis()
 
-    LOGO_DOSYA   = "logo.png"   # kendi görselinizi yerleştirin
-    BIRIM        = "cm"
-    GENISLIK_CM  = 15
-    YUKSEKLIK_CM = 5
-    BAS_X        = 0
-    BAS_Y        = 0
+    # -------------------- AYARLAR --------------------
+    
+    LOGO_DOSYA = "logo.png"      # Logo dosyası
+    
+    # Boyut ayarları
+    BIRIM = "cm"
+    GENISLIK = 15                # Genişlik (cm)
+    YUKSEKLIK = 5                # Yükseklik (cm)  
+    BAS_X = 0                    # Başlangıç X
+    BAS_Y = 0                    # Başlangıç Y
+    
+    # Renk ve segmentasyon
+    N_COLORS = 4                 # Algılanacak renk sayısı
+    BLACK_THRESHOLD = 60         # Siyah eşiği (0-255, bu değerin altı siyah sayılır)
+    MIN_AREA_PX = 100            # Minimum alan (piksel)
+    
+    # Dikiş ayarları
+    OUTLINE = True               # Kontur dikişi
+    FILL = True                  # Dolgu dikişi
+    HATCH_STEP_MM = 0.6          # Dolgu satır aralığı (mm)
+    STITCH_STEP_MM = 0.5         # Dikiş adım uzunluğu (mm)
+    SIMPLIFY_EPS = 1.0           # Kontur sadeleştirme
+    MIN_CONTOUR_LEN = 3          # Minimum kontur noktası
+    
+    # -------------------------------------------------
 
-    N_COLORS              = 4
-    MIN_AREA_PX           = 50
-    OUTLINE               = True
-    FILL                  = True
-    HATCH_STEP_MM         = 0.6   # dolgu satır aralığı (küçükse daha sık)
-    STITCH_STEP_MM        = 0.5   # dikiş aralığı
-    SIMPLIFY_EPS          = 0.35
-    MIN_CONTOUR_LEN       = 2
-
-    IGNORE_BLACK          = True
-    BLACK_THRESH          = 50    # 40–60 arası deneyebilirsiniz
-    IGNORE_WHITE          = True  # beyaz zemini atlamak için
-    WHITE_THRESH          = 245
-    BG_MODE               = "auto"   # 'auto', 'darkest', 'brightest'
-    MAX_AREA_FRAC_SKIP    = 0.35     # %35’ten büyük kümeleri atla (alt tabaka)
-
+    print("\n" + "="*60)
+    print("🧵 TATLI DURAĞI LOGO NAKİŞ DÖNÜŞTÜRÜCÜ")
+    print("="*60)
+    print("⚙️ Siyah arka plan otomatik algılanacak ve atlanacak")
+    print(f"⚙️ Siyah eşiği: {BLACK_THRESHOLD} (RGB ortalaması)")
+    
     m.logo_isle(
         image_path=LOGO_DOSYA,
         baslangic_x=BAS_X,
         baslangic_y=BAS_Y,
-        genislik=GENISLIK_CM,
-        yukseklik=YUKSEKLIK_CM,
+        genislik=GENISLIK,
+        yukseklik=YUKSEKLIK,
         birim=BIRIM,
         n_colors=N_COLORS,
         min_area_px=MIN_AREA_PX,
@@ -454,12 +520,7 @@ if __name__ == "__main__":
         stitch_step_mm=STITCH_STEP_MM,
         simplify_epsilon=SIMPLIFY_EPS,
         min_contour_len=MIN_CONTOUR_LEN,
-        ignore_black=IGNORE_BLACK,
-        black_thresh=BLACK_THRESH,
-        ignore_white=IGNORE_WHITE,
-        white_thresh=WHITE_THRESH,
-        bg_mode=BG_MODE,
-        max_area_fraction_skip=MAX_AREA_FRAC_SKIP,
+        black_threshold=BLACK_THRESHOLD,
     )
 
-    m.kaydet("logo")
+    m.kaydet("tatli_duragi")
