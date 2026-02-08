@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Profesyonel Nakış Yazı Makinesi v5
-Her harf: 1 JUMP → Underlay ileri → Sargı geri → 1 TRIM
-Harf içinde sıfır atlama, sıfır duraksama
+Profesyonel Nakış Yazı Makinesi v6
+Her harf: JUMP → Underlay ileri → Sargı geri → TRIM
+Harf arası geçişlerde dikiş yok, sadece JUMP
 YENİ: 
+  - Harf geçişlerinde dikiş atma sorunu düzeltildi
   - Belirtilen alana (genişlik x yükseklik) otomatik sığdırma
   - Ayarlanabilir harf aralığı
   - Yazı tipi: Normal, Bold, Italic
@@ -19,6 +20,8 @@ class ProfesyonelNakis:
 
     def __init__(self):
         self.pattern = pyembroidery.EmbPattern()
+        self.son_x = None
+        self.son_y = None
 
     # ── Yardımcılar ──────────────────────────────────────────────
 
@@ -38,6 +41,8 @@ class ProfesyonelNakis:
                 int(x1 + (x2 - x1) * t),
                 int(y1 + (y2 - y1) * t),
             )
+        self.son_x = int(x2)
+        self.son_y = int(y2)
         return (x2, y2)
 
     def _satin(self, x1, y1, x2, y2, kalinlik_mm):
@@ -57,10 +62,16 @@ class ProfesyonelNakis:
             if i % 2 == 0:
                 self.pattern.add_stitch_absolute(
                     pyembroidery.STITCH, int(cx + nx), int(cy + ny))
+                self.son_x = int(cx + nx)
+                self.son_y = int(cy + ny)
             else:
                 self.pattern.add_stitch_absolute(
                     pyembroidery.STITCH, int(cx - nx), int(cy - ny))
+                self.son_x = int(cx - nx)
+                self.son_y = int(cy - ny)
         self.pattern.add_stitch_absolute(pyembroidery.STITCH, int(x2), int(y2))
+        self.son_x = int(x2)
+        self.son_y = int(y2)
         return (x2, y2)
 
     # ── Italic Dönüşümü ──────────────────────────────────────────
@@ -69,7 +80,6 @@ class ProfesyonelNakis:
         """Çizgileri italic (eğik) yapar - x += y * egim"""
         italic_cizgiler = []
         for a, b, c, d in cizgiler:
-            # Her noktanın x koordinatını y'ye göre kaydır
             a_new = a + b * egim
             c_new = c + d * egim
             italic_cizgiler.append((a_new, b, c_new, d))
@@ -91,9 +101,18 @@ class ProfesyonelNakis:
             for a, b, c, d in cizgiler
         ]
 
-        # ── 1) JUMP: ilk noktaya atla ──
-        self.pattern.add_stitch_absolute(
-            pyembroidery.JUMP, int(segs[0][0]), int(segs[0][1]))
+        # ── 1) JUMP: ilk noktaya atla (dikiş atmadan) ──
+        ilk_x, ilk_y = int(segs[0][0]), int(segs[0][1])
+        
+        # Önceki konumdan uzaksa TRIM ekle
+        if self.son_x is not None and self.son_y is not None:
+            if self._mesafe(self.son_x, self.son_y, ilk_x, ilk_y) > 50:
+                # Önce mevcut konumda TRIM
+                self.pattern.add_stitch_absolute(
+                    pyembroidery.TRIM, self.son_x, self.son_y)
+        
+        # Yeni harfin başına JUMP
+        self.pattern.add_stitch_absolute(pyembroidery.JUMP, ilk_x, ilk_y)
         cx, cy = segs[0][0], segs[0][1]
 
         # ── 2) UNDERLAY: tüm segmentleri ileriye running stitch ──
@@ -111,6 +130,8 @@ class ProfesyonelNakis:
         # ── 4) TRIM: harf bitti, iplik kes ──
         self.pattern.add_stitch_absolute(
             pyembroidery.TRIM, int(cx), int(cy))
+        self.son_x = int(cx)
+        self.son_y = int(cy)
 
     # ── Metin Boyutlarını Hesapla ────────────────────────────────
 
@@ -167,13 +188,11 @@ class ProfesyonelNakis:
             toplam_genislik += gx
             harf_sayisi += 1
         
-        # Harf aralıklarını ekle (son harften sonra ekleme)
         if harf_sayisi > 1:
             toplam_genislik += harf_araligi_oran * (harf_sayisi - 1)
         
-        # Italic için ekstra genişlik (eğim nedeniyle)
         if italic:
-            italic_ekstra = max_y * 0.25  # Eğim oranı kadar ekstra
+            italic_ekstra = max_y * 0.25
             toplam_genislik += italic_ekstra
         
         toplam_yukseklik = max_y - min_y
@@ -196,23 +215,9 @@ class ProfesyonelNakis:
             genislik: İstenen toplam genişlik
             yukseklik: İstenen toplam yükseklik
             harf_araligi: Harfler arası mesafe (cm veya mm, birime göre)
-                          None ise otomatik (harf yüksekliğinin %25'i)
             normal: Normal yazı tipi (True/False)
             bold: Kalın yazı tipi (True/False)
             italic: Eğik yazı tipi (True/False)
-        
-        Örnekler:
-            # Normal yazı, 1cm harf aralığı
-            isim_yaz("Test", 0, 0, genislik=10, yukseklik=2, harf_araligi=1, normal=True)
-            
-            # Bold yazı, 0.5cm harf aralığı
-            isim_yaz("Test", 0, 0, genislik=10, yukseklik=2, harf_araligi=0.5, bold=True)
-            
-            # Italic yazı
-            isim_yaz("Test", 0, 0, genislik=10, yukseklik=2, italic=True)
-            
-            # Bold + Italic
-            isim_yaz("Test", 0, 0, genislik=10, yukseklik=2, bold=True, italic=True)
         """
         
         # Birim dönüşümü
@@ -228,28 +233,22 @@ class ProfesyonelNakis:
         
         # Yazı tipi kalınlık çarpanı
         if bold:
-            kalinlik_carpan = 1.8  # Bold için %80 daha kalın
+            kalinlik_carpan = 1.8
         else:
-            kalinlik_carpan = 1.0  # Normal
+            kalinlik_carpan = 1.0
         
         # Harf aralığı hesaplama
-        # Geçici ölçek için önce boyut veya alan bazlı hesap yap
         if genislik is not None and yukseklik is not None:
-            # Alana sığdırma - geçici ölçek tahmini
             gecici_olcek = min(genislik, yukseklik) * birim_carpan
         elif boyut is not None:
             gecici_olcek = boyut * (10 if birim == "cm" else 1) * 10
         else:
-            gecici_olcek = 200  # Varsayılan 2cm
+            gecici_olcek = 200
         
-        # Harf aralığı oranı hesapla
         if harf_araligi is not None:
-            # Kullanıcı belirli bir aralık verdi (cm veya mm)
             harf_araligi_px = harf_araligi * birim_carpan
-            # Oranı hesapla (ölçeğe göre normalize et)
             harf_araligi_oran = harf_araligi_px / gecici_olcek if gecici_olcek > 0 else 0.25
         else:
-            # Varsayılan: harf yüksekliğinin %25'i
             harf_araligi_oran = 0.25
         
         # Metin boyutlarını hesapla
@@ -266,7 +265,6 @@ class ProfesyonelNakis:
             
             sc = min(olcek_gen, olcek_yuk)
             
-            # Harf aralığını yeniden hesapla (gerçek ölçeğe göre)
             if harf_araligi is not None:
                 ara = harf_araligi * birim_carpan
             else:
@@ -590,6 +588,10 @@ class ProfesyonelNakis:
         base_kalinlik = max(2.0, min(5.0, harf_mm * 0.13))
         kalinlik = base_kalinlik * kalinlik_carpan
 
+        # İlk harften önce başlangıç konumunu ayarla
+        self.son_x = None
+        self.son_y = None
+
         # ── Harf harf dik ──
         for harf in metin:
             if harf == ' ':
@@ -669,7 +671,7 @@ if __name__ == '__main__':
     #  AYARLAR
     # ═══════════════════════════════════════════════════════════════
     
-    ISIM  = "SELMAN"
+    ISIM  = "Mehmet Öz 2025"
     BIRIM = "cm"              # "cm" veya "mm"
     
     # Alan ayarları
@@ -682,8 +684,8 @@ if __name__ == '__main__':
     
     # Yazı tipi ayarları (sadece birini True yapın, veya bold+italic birlikte)
     NORMAL = False            # Normal yazı
-    BOLD   = False             # Kalın yazı
-    ITALIC = True            # Eğik yazı
+    BOLD   = True             # Kalın yazı
+    ITALIC = False            # Eğik yazı
     
     # ═══════════════════════════════════════════════════════════════
     
