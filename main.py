@@ -1,21 +1,20 @@
 import pyembroidery
 import math
 
-class NakisMotoru:
+class ProfesyonelNakis:
     def __init__(self):
         self.pattern = pyembroidery.EmbPattern()
-        # DÜZELTME: set_metadata yerine doğrudan isim atıyoruz
-        self.pattern.name = "ModernNakis"
+        self.pattern.name = "UltraSargi"
     
     def _mesafe(self, x1, y1, x2, y2):
         return math.sqrt((x2 - x1)**2 + (y2 - y1)**2)
 
-    def sargi_ve_alt_dikis(self, x1, y1, x2, y2, kalinlik_mm=3.0):
+    def tam_sargi_yap(self, x1, y1, x2, y2, kalinlik_mm):
         """
-        1. Önce altına 'running stitch' (alt dikiş) atar.
-        2. Sonra üzerine 'satin stitch' (sargı) atar.
+        BU FONKSİYON "SIKIRTIRS" GÖRÜNTÜYÜ SAĞLAR.
+        Hem alt dolgu yapar hem de üst sargıyı çok sık atar.
         """
-        # Nakış birimi (1mm = 10 birim)
+        # 1mm = 10 birim
         genislik = kalinlik_mm * 10
         dx = x2 - x1
         dy = y2 - y1
@@ -23,104 +22,134 @@ class NakisMotoru:
         
         if dist == 0: return
 
-        # Vektör hesaplamaları (Dik açı bulmak için)
+        # Vektör hesaplamaları (Dik açı)
         nx = -dy / dist * (genislik / 2)
         ny = dx / dist * (genislik / 2)
 
-        # --- ADIM 1: ALT DİKİŞ (UNDERLAY) ---
+        # === 1. AŞAMA: ALT DOLGU (UNDERLAY) ===
+        # Nakışın kabarık durması için alta zemin hazırlarız.
+        # Kenarlardan biraz içeriden giden bir hat çiziyoruz.
+        
+        kucultme_faktoru = 0.7 # Alt dikiş sargıdan daha dar olsun
+        nx_alt = nx * kucultme_faktoru
+        ny_alt = ny * kucultme_faktoru
+
         self.pattern.add_stitch_absolute(pyembroidery.JUMP, x1, y1)
         
-        adim_sayisi_alt = int(dist // 20)
-        if adim_sayisi_alt < 1: adim_sayisi_alt = 1
+        # Ortadan bir dikiş git
+        steps_alt = int(dist // 30) + 1
+        for i in range(steps_alt + 1):
+             self.pattern.add_stitch_absolute(pyembroidery.STITCH, int(x1 + dx*i/steps_alt), int(y1 + dy*i/steps_alt))
         
-        for i in range(1, adim_sayisi_alt + 1):
-            cx = x1 + (dx * i / adim_sayisi_alt)
-            cy = y1 + (dy * i / adim_sayisi_alt)
-            self.pattern.add_stitch_absolute(pyembroidery.STITCH, int(cx), int(cy))
-        
-        # Geri dön
+        # Geri dön (Çift kat alt dikiş = Daha kabarık)
         self.pattern.add_stitch_absolute(pyembroidery.STITCH, int(x1), int(y1))
 
-        # --- ADIM 2: SARGI (SATIN STITCH) ---
-        # 0.4mm (4 birim) yoğunluk
-        adim_sayisi_sargi = int(dist // 4)
-        if adim_sayisi_sargi < 2: adim_sayisi_sargi = 2
 
-        for i in range(adim_sayisi_sargi + 1):
-            ratio = i / adim_sayisi_sargi
+        # === 2. AŞAMA: SÜPER SIKI SARGI (TOP SATIN) ===
+        # Buradaki "3" sayısı yoğunluktur. Sayı küçüldükçe dikiş sıklaşır.
+        # Normalde 4 veya 5 kullanılır. Biz 3 yaptık (Çok Sıkı).
+        YOGUNLUK = 3 
+        
+        steps_sargi = int(dist // YOGUNLUK)
+        if steps_sargi < 2: steps_sargi = 2
+
+        for i in range(steps_sargi + 1):
+            ratio = i / steps_sargi
             cx = x1 + (dx * ratio)
             cy = y1 + (dy * ratio)
             
-            # Zikzak
+            # Zikzak at (Sargı)
             if i % 2 == 0:
                 self.pattern.add_stitch_absolute(pyembroidery.STITCH, int(cx + nx), int(cy + ny))
             else:
                 self.pattern.add_stitch_absolute(pyembroidery.STITCH, int(cx - nx), int(cy - ny))
 
-    def yazi_yaz(self, metin, baslangic_x, baslangic_y, harf_boyu_mm):
+    def isim_yaz(self, metin, baslangic_x, baslangic_y, harf_boyu_mm):
         mevcut_x = baslangic_x
         scale = harf_boyu_mm * 10
-        bosluk = scale * 0.2 
+        bosluk = scale * 0.25 # Harfler birbirine girmesin diye %25 boşluk
 
-        # HARF VEKTÖR VERİTABANI (Genişletildi)
+        # --- GELİŞMİŞ ALFABE ---
         alfabe = {
-            'P': [(0,0, 0,1), (0,1, 0.5,1), (0.5,1, 0.5,0.5), (0.5,0.5, 0,0.5)],
-            'I': [(0.25,0, 0.25,1)],
-            'V': [(0,1, 0.5,0), (0.5,0, 1,1)],
             'A': [(0,0, 0.5,1), (0.5,1, 1,0), (0.2,0.4, 0.8,0.4)],
+            'B': [(0,0, 0,1), (0,1, 0.7,1), (0.7,1, 0.7,0.5), (0.7,0.5, 0,0.5), (0,0.5, 0.8,0.5), (0.8,0.5, 0.8,0), (0.8,0, 0,0)],
+            'C': [(1,1, 0,1), (0,1, 0,0), (0,0, 1,0)],
+            'D': [(0,0, 0,1), (0,1, 0.7,1), (0.7,1, 1,0.5), (1,0.5, 0.7,0), (0.7,0, 0,0)],
+            'E': [(1,1, 0,1), (0,1, 0,0), (0,0, 1,0), (0,0.5, 0.8,0.5)],
+            'F': [(1,1, 0,1), (0,1, 0,0), (0,0.5, 0.8,0.5)],
+            'G': [(1,1, 0,1), (0,1, 0,0), (0,0, 1,0), (1,0, 1,0.5), (1,0.5, 0.5,0.5)],
+            'H': [(0,0, 0,1), (1,0, 1,1), (0,0.5, 1,0.5)],
+            'I': [(0.5,0, 0.5,1)],
+            'J': [(0.5,1, 0.5,0.2), (0.5,0.2, 0,0)],
+            'K': [(0,0, 0,1), (1,1, 0,0.5), (0,0.5, 1,0)],
+            'L': [(0,1, 0,0), (0,0, 0.8,0)],
+            'M': [(0,0, 0,1), (0,1, 0.5,0), (0.5,0, 1,1), (1,1, 1,0)],
+            'N': [(0,0, 0,1), (0,1, 1,0), (1,0, 1,1)],
+            'O': [(0,0, 0,1), (0,1, 1,1), (1,1, 1,0), (1,0, 0,0)],
+            'P': [(0,0, 0,1), (0,1, 0.8,1), (0.8,1, 0.8,0.5), (0.8,0.5, 0,0.5)],
+            'R': [(0,0, 0,1), (0,1, 0.8,1), (0.8,1, 0.8,0.5), (0.8,0.5, 0,0.5), (0.5,0.5, 1,0)],
+            'S': [(1,1, 0,1), (0,1, 0,0.5), (0,0.5, 1,0.5), (1,0.5, 1,0), (1,0, 0,0)],
+            'T': [(0.5,0, 0.5,1), (0,1, 1,1)],
+            'U': [(0,1, 0,0), (0,0, 1,0), (1,0, 1,1)],
+            'V': [(0,1, 0.5,0), (0.5,0, 1,1)],
+            'Y': [(0,1, 0.5,0.5), (1,1, 0.5,0.5), (0.5,0.5, 0.5,0)],
             'Z': [(0,1, 1,1), (1,1, 0,0), (0,0, 1,0)],
-            'N': [(0,0, 0,1), (0,1, 1,0), (1,0, 1,1)], # N harfi eklendi
-            'K': [(0,0, 0,1), (0,0.5, 0.8,1), (0,0.5, 0.8,0)], # K harfi eklendi
-            'S': [(1,1, 0,1), (0,1, 0,0.5), (0,0.5, 1,0.5), (1,0.5, 1,0), (1,0, 0,0)], # S harfi (köşeli) eklendi
-            '-': [(0,0.5, 1,0.5)],
-            ' ': [] # Boşluk
+            ' ': [], 
+            '-': [(0,0.5, 1,0.5)]
         }
+
+        # Kalınlığı harf boyuna göre "Tok" duracak şekilde ayarla
+        # Harf boyunun %12'si kadar kalınlık (Normalden daha kalın)
+        sargi_kalinligi = harf_boyu_mm * 0.12
+        if sargi_kalinligi < 2.5: sargi_kalinligi = 2.5 # Minimum kalınlık
 
         for harf in metin.upper():
             if harf == " ":
-                mevcut_x += scale * 0.5
+                mevcut_x += scale * 0.6
                 continue
             
             if harf not in alfabe:
-                print(f"Uyarı: '{harf}' harfi veritabanında yok, atlanıyor.")
+                print(f"Uyarı: {harf} yok.")
                 continue
 
             cizgiler = alfabe[harf]
             
-            # Harf kalınlığını boyuta göre ayarla (Min 2mm, Max 4mm)
-            kalinlik = max(2.0, min(4.0, harf_boyu_mm / 8))
-
             for (lx1, ly1, lx2, ly2) in cizgiler:
-                gercek_x1 = mevcut_x + (lx1 * scale * 0.6)
-                gercek_y1 = baslangic_y + (ly1 * scale)
-                gercek_x2 = mevcut_x + (lx2 * scale * 0.6)
-                gercek_y2 = baslangic_y + (ly2 * scale)
+                # Koordinat hesapla
+                gx1 = mevcut_x + (lx1 * scale * 0.7)
+                gy1 = baslangic_y + (ly1 * scale)
+                gx2 = mevcut_x + (lx2 * scale * 0.7)
+                gy2 = baslangic_y + (ly2 * scale)
                 
-                self.sargi_ve_alt_dikis(gercek_x1, gercek_y1, gercek_x2, gercek_y2, kalinlik_mm=kalinlik)
+                self.tam_sargi_yap(gx1, gy1, gx2, gy2, sargi_kalinligi)
 
-            mevcut_x += (scale * 0.6) + bosluk
+            # Bir sonraki harfe geç
+            mevcut_x += (scale * 0.7) + bosluk
 
     def kaydet(self, dosya_adi):
-        # Son bir temizlik ve ortalama
         self.pattern = self.pattern.get_normalized_pattern()
-        
-        # Dosyaları yaz
-        pyembroidery.write(self.pattern, f"{dosya_adi}.dst")
-        pyembroidery.write(self.pattern, f"{dosya_adi}.jef")
-        print(f"--- {dosya_adi} BASARIYLA URETILDI ---")
+        ad_temiz = dosya_adi.replace(" ", "_").lower()
+        pyembroidery.write(self.pattern, f"{ad_temiz}.dst")
+        pyembroidery.write(self.pattern, f"{ad_temiz}.jef")
+        print(f"✅ {dosya_adi} İÇİN DOSYALAR HAZIR: {ad_temiz}.jef")
 
-# --- SENARYO ---
-def uretim_senaryosu():
-    motor = NakisMotoru()
-    
-    # SENARYO:
-    # 1. PIVAZ yazısı (Büyük, Üstte)
-    motor.yazi_yaz("PIVAZ", -400, 100, 40) 
-    
-    # 2. NAKIS yazısı (Orta, Altta) - Artık N, K, S harfleri tanımlı!
-    motor.yazi_yaz("NAKIS", -400, -400, 30)
-
-    motor.kaydet("modern_tasarim")
-
+# ==========================================
+# BURAYI DEĞİŞTİR (MÜŞTERİ PANELİ)
+# ==========================================
 if __name__ == "__main__":
-    uretim_senaryosu()
+    
+    makine = ProfesyonelNakis()
+
+    # ---------------------------------------
+    # SADECE BURADAKİ 2 SATIRI DEĞİŞTİR
+    # ---------------------------------------
+    MUSTERI_ISMI = "MEHMET"  
+    ISTENEN_BOYUT = 120      # mm cinsinden (Örn: 12cm)
+    # ---------------------------------------
+
+    # Yazıyı ortalamak için hesap (Otomatik)
+    baslama_yeri = len(MUSTERI_ISMI) * ISTENEN_BOYUT * -0.35
+    
+    # İşlemi Başlat
+    makine.isim_yaz(MUSTERI_ISMI, baslama_yeri, 0, ISTENEN_BOYUT)
+    makine.kaydet(MUSTERI_ISMI)
