@@ -2,9 +2,9 @@
 # -*- coding: utf-8 -*-
 """
 TATLI DURAĞI LOGO - PROFESYONEL NAKİŞ
-1. Önce tüm konturları çizer
-2. Sonra dolgu/sargılama yapar
-3. Atlama yok - sürekli dikiş
+- Tam desen görme (edge detection + renk)
+- Atlama yok - STOP ile durdurma
+- Önce kontur çiz, sonra sargıla
 """
 
 import math
@@ -18,115 +18,120 @@ import cv2
 class LogoNakis:
     def __init__(self):
         self.pattern = pyembroidery.EmbPattern()
+        self.last_x = 0
+        self.last_y = 0
         
     def mesafe(self, x1, y1, x2, y2):
         return math.hypot(x2 - x1, y2 - y1)
 
-    def noktalar_sirala(self, contours, last_x, last_y):
-        """Konturları en yakından başlayarak sırala - atlama azalt"""
-        if not contours:
-            return []
+    def safe_stitch(self, x, y):
+        """Güvenli dikiş - max 7mm, atlama varsa STOP"""
+        MAX_STITCH = 70  # 7mm
+        JUMP_LIMIT = 30  # 3mm üzeri = potansiyel atlama
         
-        sorted_list = []
-        remaining = list(contours)
-        cx, cy = last_x, last_y
+        x = int(round(x))
+        y = int(round(y))
         
-        while remaining:
-            best_idx = 0
-            best_dist = float('inf')
-            best_start = 0
-            
-            for i, cnt in enumerate(remaining):
-                if len(cnt) < 2:
-                    continue
-                # En yakın başlangıç noktası
-                for j, pt in enumerate(cnt):
-                    d = self.mesafe(cx, cy, pt[0], pt[1])
-                    if d < best_dist:
-                        best_dist = d
-                        best_idx = i
-                        best_start = j
-            
-            cnt = remaining.pop(best_idx)
-            # Başlangıç noktasından başlayacak şekilde döndür
-            if best_start > 0:
-                cnt = cnt[best_start:] + cnt[:best_start]
-            
-            sorted_list.append(cnt)
-            if cnt:
-                cx, cy = cnt[-1]
+        dist = self.mesafe(self.last_x, self.last_y, x, y)
         
-        return sorted_list
+        if dist > MAX_STITCH:
+            # Uzun mesafe - ara noktalar + STOP
+            steps = int(dist / MAX_STITCH) + 1
+            
+            # ÖNCE STOP - makine durur, kullanıcı ipliği kontrol eder
+            if dist > 100:  # 10mm üzeri atlama
+                self.pattern.add_command(pyembroidery.STOP)
+            
+            for i in range(1, steps + 1):
+                t = i / steps
+                mx = int(self.last_x + (x - self.last_x) * t)
+                my = int(self.last_y + (y - self.last_y) * t)
+                self.pattern.add_stitch_absolute(pyembroidery.STITCH, mx, my)
+                self.last_x, self.last_y = mx, my
+        else:
+            self.pattern.add_stitch_absolute(pyembroidery.STITCH, x, y)
+            self.last_x, self.last_y = x, y
 
-    def resample(self, pts, step):
-        """Noktaları eşit aralıklarla örnekle"""
+    def move_to(self, x, y):
+        """Pozisyon değiştir - STOP ile durdur"""
+        x = int(round(x))
+        y = int(round(y))
+        
+        dist = self.mesafe(self.last_x, self.last_y, x, y)
+        
+        if dist > 50:  # 5mm üzeri hareket = STOP
+            self.pattern.add_command(pyembroidery.STOP)
+        
+        # Küçük dikişlerle git
+        if dist > 30:
+            steps = int(dist / 30) + 1
+            for i in range(1, steps + 1):
+                t = i / steps
+                mx = int(self.last_x + (x - self.last_x) * t)
+                my = int(self.last_y + (y - self.last_y) * t)
+                self.pattern.add_stitch_absolute(pyembroidery.STITCH, mx, my)
+                self.last_x, self.last_y = mx, my
+        else:
+            self.pattern.add_stitch_absolute(pyembroidery.STITCH, x, y)
+            self.last_x, self.last_y = x, y
+
+    def resample_points(self, pts, step=25):
+        """Noktaları eşit aralıkla örnekle"""
         if len(pts) < 2:
             return pts
         
         result = [pts[0]]
+        accum = 0
+        
         for i in range(1, len(pts)):
-            x0, y0 = pts[i-1]
+            x0, y0 = result[-1]
             x1, y1 = pts[i]
             d = self.mesafe(x0, y0, x1, y1)
             
             if d < 1:
                 continue
             
-            n_steps = max(1, int(d / step))
-            for j in range(1, n_steps + 1):
-                t = j / n_steps
-                nx = x0 + (x1 - x0) * t
-                ny = y0 + (y1 - y0) * t
+            while accum + d >= step:
+                ratio = (step - accum) / d
+                nx = x0 + (x1 - x0) * ratio
+                ny = y0 + (y1 - y0) * ratio
                 result.append((nx, ny))
+                x0, y0 = nx, ny
+                d = self.mesafe(x0, y0, x1, y1)
+                accum = 0
+            
+            accum += d
+        
+        # Son noktayı ekle
+        if self.mesafe(result[-1][0], result[-1][1], pts[-1][0], pts[-1][1]) > 5:
+            result.append(pts[-1])
         
         return result
 
-    def safe_stitch(self, x, y, last_x, last_y, first=False):
-        """Güvenli dikiş - 12mm max"""
-        MAX_JUMP = 120
-        
-        x = int(round(x))
-        y = int(round(y))
-        
-        if first:
-            self.pattern.add_stitch_absolute(pyembroidery.STITCH, x, y)
-            return x, y
-        
-        dist = self.mesafe(last_x, last_y, x, y)
-        
-        if dist > MAX_JUMP:
-            # Ara noktalar ekle (STITCH olarak - atlama değil)
-            steps = int(dist / MAX_JUMP) + 1
-            for i in range(1, steps + 1):
-                t = i / steps
-                mx = int(last_x + (x - last_x) * t)
-                my = int(last_y + (y - last_y) * t)
-                self.pattern.add_stitch_absolute(pyembroidery.STITCH, mx, my)
-            return x, y
-        else:
-            self.pattern.add_stitch_absolute(pyembroidery.STITCH, x, y)
-            return x, y
-
-    def kontur_ciz(self, pts, last_x, last_y):
-        """Tek kontur çiz - sürekli dikiş"""
+    def kontur_ciz(self, pts):
+        """Kontur dikişi - düz çizgi"""
         if len(pts) < 2:
-            return last_x, last_y
+            return
         
-        for i, (x, y) in enumerate(pts):
-            if i == 0 and last_x is None:
-                self.pattern.add_stitch_absolute(pyembroidery.STITCH, int(x), int(y))
-                last_x, last_y = int(x), int(y)
-            else:
-                last_x, last_y = self.safe_stitch(x, y, last_x, last_y)
+        pts = self.resample_points(pts, 25)  # 2.5mm aralık
         
-        return last_x, last_y
+        # İlk noktaya git
+        self.move_to(pts[0][0], pts[0][1])
+        
+        # Tüm noktaları dik
+        for x, y in pts[1:]:
+            self.safe_stitch(x, y)
 
-    def saten_doldur(self, pts, genislik, last_x, last_y):
-        """Saten dolgu - kontur boyunca zigzag"""
+    def saten_dolgu(self, pts, genislik=20):
+        """Saten dikiş - zigzag dolgu"""
         if len(pts) < 2:
-            return last_x, last_y
+            return
         
+        pts = self.resample_points(pts, 15)  # 1.5mm aralık (sık)
         half_w = genislik / 2
+        
+        # İlk noktaya git
+        self.move_to(pts[0][0], pts[0][1])
         
         for i in range(len(pts) - 1):
             x0, y0 = pts[i]
@@ -139,32 +144,24 @@ class LogoNakis:
             if length < 1:
                 continue
             
-            # Normal vektör (dik)
+            # Dik yön
             nx = -dy / length * half_w
             ny = dx / length * half_w
             
-            # Zigzag - sol ve sağ
-            px1, py1 = x0 + nx, y0 + ny
-            px2, py2 = x0 - nx, y0 - ny
-            
-            if last_x is None:
-                self.pattern.add_stitch_absolute(pyembroidery.STITCH, int(px1), int(py1))
-                last_x, last_y = int(px1), int(py1)
-            
-            last_x, last_y = self.safe_stitch(px1, py1, last_x, last_y)
-            last_x, last_y = self.safe_stitch(px2, py2, last_x, last_y)
-        
-        return last_x, last_y
+            # Zigzag
+            self.safe_stitch(x0 + nx, y0 + ny)
+            self.safe_stitch(x0 - nx, y0 - ny)
 
-    def alan_doldur(self, mask, scale, offset_x, offset_y, satir_aralik=8):
-        """Alan dolgu - yatay tarama"""
+    def alan_doldur(self, mask, scale, offset_x, offset_y, img_h, satir_aralik=6):
+        """Alan dolgu - yatay tarama çizgileri"""
         h, w = mask.shape
-        last_x, last_y = None, None
         direction = 1
+        first_point = True
         
         for row in range(0, h, satir_aralik):
-            # Bu satırdaki pikselleri bul
             line = mask[row, :]
+            
+            # Segmentleri bul
             segments = []
             inside = False
             start = 0
@@ -175,95 +172,124 @@ class LogoNakis:
                     start = col
                 elif line[col] == 0 and inside:
                     inside = False
-                    if col - start > 3:
+                    if col - start > 2:
                         segments.append((start, col))
             
-            if inside and w - start > 3:
+            if inside and w - start > 2:
                 segments.append((start, w))
             
             if not segments:
                 continue
             
-            # Yön değiştir (zigzag için)
+            # Yön değiştir
             if direction < 0:
                 segments = segments[::-1]
             
-            for seg_start, seg_end in segments:
+            for seg in segments:
+                s, e = seg
                 if direction < 0:
-                    seg_start, seg_end = seg_end, seg_start
+                    s, e = e, s
                 
-                # Piksel -> nakış koordinatı
-                ex1 = offset_x + seg_start * scale
-                ex2 = offset_x + seg_end * scale
-                ey = offset_y + (h - row) * scale
+                # Koordinat dönüşümü
+                ex1 = offset_x + s * scale
+                ex2 = offset_x + e * scale
+                ey = offset_y + (img_h - row) * scale
                 
-                if last_x is None:
-                    self.pattern.add_stitch_absolute(pyembroidery.STITCH, int(ex1), int(ey))
-                    last_x, last_y = int(ex1), int(ey)
+                if first_point:
+                    self.move_to(ex1, ey)
+                    first_point = False
                 else:
-                    last_x, last_y = self.safe_stitch(ex1, ey, last_x, last_y)
+                    # Satır başına git
+                    self.safe_stitch(ex1, ey)
                 
-                last_x, last_y = self.safe_stitch(ex2, ey, last_x, last_y)
+                # Satır sonu
+                self.safe_stitch(ex2, ey)
             
             direction *= -1
-        
-        return last_x, last_y
 
-    def renk_ayikla(self, img_rgb, renk_adi):
-        """Renkleri ayıkla - daha hassas"""
+    def tum_kenarlar_bul(self, img_rgb):
+        """Tüm kenarları bul - Canny + morfoloji"""
+        gray = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2GRAY)
+        
+        # Gürültü azalt
+        blur = cv2.GaussianBlur(gray, (3, 3), 0)
+        
+        # Canny kenar tespiti (düşük eşik = daha fazla detay)
+        edges = cv2.Canny(blur, 30, 100)
+        
+        # Kalınlaştır
+        kernel = np.ones((2, 2), np.uint8)
+        edges = cv2.dilate(edges, kernel, iterations=1)
+        
+        return edges
+
+    def renk_maskesi(self, img_rgb, renk):
+        """Renk maskesi oluştur"""
         hsv = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2HSV)
         
-        if renk_adi == "gold":
-            # Altın/Sarı - geniş aralık
-            lower1 = np.array([15, 50, 100])
-            upper1 = np.array([40, 255, 255])
-            mask = cv2.inRange(hsv, lower1, upper1)
+        if renk == "gold":
+            # Sarı/Altın - geniş aralık
+            lower = np.array([15, 40, 80])
+            upper = np.array([45, 255, 255])
+            mask = cv2.inRange(hsv, lower, upper)
             
-        elif renk_adi == "red":
-            # Kırmızı - iki aralık (0 ve 180 civarı)
-            lower1 = np.array([0, 70, 50])
+            # Turuncu tonları da ekle
+            lower2 = np.array([10, 50, 100])
+            upper2 = np.array([20, 255, 255])
+            mask2 = cv2.inRange(hsv, lower2, upper2)
+            mask = cv2.bitwise_or(mask, mask2)
+            
+        elif renk == "red":
+            # Kırmızı (iki aralık)
+            lower1 = np.array([0, 50, 50])
             upper1 = np.array([10, 255, 255])
-            lower2 = np.array([160, 70, 50])
+            lower2 = np.array([160, 50, 50])
             upper2 = np.array([180, 255, 255])
             mask1 = cv2.inRange(hsv, lower1, upper1)
             mask2 = cv2.inRange(hsv, lower2, upper2)
             mask = cv2.bitwise_or(mask1, mask2)
             
-        elif renk_adi == "white":
-            # Beyaz
-            lower = np.array([0, 0, 180])
-            upper = np.array([180, 50, 255])
+            # Bordo/koyu kırmızı
+            lower3 = np.array([0, 30, 30])
+            upper3 = np.array([15, 200, 150])
+            mask3 = cv2.inRange(hsv, lower3, upper3)
+            mask = cv2.bitwise_or(mask, mask3)
+            
+        elif renk == "white":
+            # Beyaz/Açık gri
+            lower = np.array([0, 0, 150])
+            upper = np.array([180, 60, 255])
             mask = cv2.inRange(hsv, lower, upper)
-        
+            
         else:
             mask = np.zeros(img_rgb.shape[:2], dtype=np.uint8)
         
-        # Morfolojik temizlik
+        # Temizle
         kernel = np.ones((3, 3), np.uint8)
         mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)
         mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
         
         return mask
 
-    def konturlari_al(self, mask, scale, offset_x, offset_y, img_h, min_alan=100):
-        """Mask'tan konturları çıkar ve nakış koordinatına çevir"""
-        contours, hierarchy = cv2.findContours(mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    def konturlari_cikart(self, mask, scale, offset_x, offset_y, img_h, min_alan=30):
+        """Mask'tan kontur listesi çıkar"""
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         
-        nakis_konturlar = []
+        result = []
         
-        for i, cnt in enumerate(contours):
+        for cnt in contours:
             alan = cv2.contourArea(cnt)
             if alan < min_alan:
                 continue
             
-            # Basitleştir
-            epsilon = 0.005 * cv2.arcLength(cnt, True)
+            # Basitleştir ama fazla değil
+            epsilon = 0.003 * cv2.arcLength(cnt, True)
             approx = cv2.approxPolyDP(cnt, epsilon, True)
             
             if len(approx) < 3:
                 continue
             
-            # Piksel -> nakış koordinatı
+            # Nakış koordinatına çevir
             pts = []
             for p in approx:
                 px, py = p[0]
@@ -273,214 +299,293 @@ class LogoNakis:
             
             # Kapat
             pts.append(pts[0])
-            
-            nakis_konturlar.append(pts)
+            result.append(pts)
         
-        return nakis_konturlar
+        return result
+
+    def kenar_konturlari(self, edges, scale, offset_x, offset_y, img_h, min_uzunluk=20):
+        """Kenar görüntüsünden konturlar"""
+        contours, _ = cv2.findContours(edges, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+        
+        result = []
+        
+        for cnt in contours:
+            uzunluk = cv2.arcLength(cnt, False)
+            if uzunluk < min_uzunluk:
+                continue
+            
+            # Basitleştir
+            epsilon = 0.005 * uzunluk
+            approx = cv2.approxPolyDP(cnt, epsilon, False)
+            
+            if len(approx) < 2:
+                continue
+            
+            pts = []
+            for p in approx:
+                px, py = p[0]
+                ex = offset_x + px * scale
+                ey = offset_y + (img_h - py) * scale
+                pts.append((ex, ey))
+            
+            result.append(pts)
+        
+        return result
+
+    def sirala_yakin(self, konturlar):
+        """Konturları en yakından başlayarak sırala"""
+        if not konturlar:
+            return []
+        
+        result = []
+        remaining = list(konturlar)
+        cx, cy = self.last_x, self.last_y
+        
+        while remaining:
+            best_idx = 0
+            best_dist = float('inf')
+            reverse = False
+            
+            for i, cnt in enumerate(remaining):
+                if not cnt:
+                    continue
+                
+                # Baştan mesafe
+                d1 = self.mesafe(cx, cy, cnt[0][0], cnt[0][1])
+                # Sondan mesafe
+                d2 = self.mesafe(cx, cy, cnt[-1][0], cnt[-1][1])
+                
+                if d1 < best_dist:
+                    best_dist = d1
+                    best_idx = i
+                    reverse = False
+                
+                if d2 < best_dist:
+                    best_dist = d2
+                    best_idx = i
+                    reverse = True
+            
+            cnt = remaining.pop(best_idx)
+            if reverse:
+                cnt = cnt[::-1]
+            
+            result.append(cnt)
+            
+            if cnt:
+                cx, cy = cnt[-1]
+        
+        return result
 
     def logo_isle(self, image_path, genislik_cm=15, yukseklik_cm=10):
-        """Ana işlem fonksiyonu"""
+        """Ana işlem"""
         
         print("\n" + "="*70)
-        print("🎨 TATLI DURAĞI LOGO - PROFESYONEL NAKİŞ")
+        print("🍰 TATLI DURAĞI LOGO - TAM DESEN NAKİŞ")
         print("="*70)
         
-        # Görüntü yükle
+        # Yükle
         img = Image.open(image_path).convert("RGB")
         img_rgb = np.array(img)
         img_h, img_w = img_rgb.shape[:2]
         
         print(f"📐 Görüntü: {img_w} x {img_h} piksel")
         
-        # Hedef boyut (0.1mm biriminde)
-        target_w = genislik_cm * 100
+        # Boyut hesapla
+        target_w = genislik_cm * 100  # 0.1mm
         target_h = yukseklik_cm * 100
         
-        # Ölçek hesapla
         scale = min(target_w / img_w, target_h / img_h)
         offset_x = (target_w - img_w * scale) / 2
         offset_y = (target_h - img_h * scale) / 2
         
-        print(f"📏 Hedef boyut: {genislik_cm} x {yukseklik_cm} cm")
-        print(f"📏 Ölçek faktörü: {scale:.4f}")
+        print(f"📏 Hedef: {genislik_cm} x {yukseklik_cm} cm")
+        print(f"📏 Ölçek: {scale:.4f}")
         
-        # ══════════════════════════════════════════════════════════════
-        # RENK MASKELARI OLUŞTUR
-        # ══════════════════════════════════════════════════════════════
+        # ═══════════════════════════════════════════════════════════
+        # GÖRÜNTÜ ANALİZİ
+        # ═══════════════════════════════════════════════════════════
         
-        print("\n🔍 Renk analizi yapılıyor...")
+        print("\n🔍 Görüntü analiz ediliyor...")
         
-        gold_mask = self.renk_ayikla(img_rgb, "gold")
-        red_mask = self.renk_ayikla(img_rgb, "red")
-        white_mask = self.renk_ayikla(img_rgb, "white")
+        # Kenarlar
+        edges = self.tum_kenarlar_bul(img_rgb)
         
-        gold_px = np.count_nonzero(gold_mask)
-        red_px = np.count_nonzero(red_mask)
-        white_px = np.count_nonzero(white_mask)
+        # Renk maskeleri
+        gold_mask = self.renk_maskesi(img_rgb, "gold")
+        red_mask = self.renk_maskesi(img_rgb, "red")
+        white_mask = self.renk_maskesi(img_rgb, "white")
         
-        print(f"   🟡 Altın: {gold_px:,} piksel")
-        print(f"   🔴 Kırmızı: {red_px:,} piksel")
-        print(f"   ⚪ Beyaz: {white_px:,} piksel")
+        # Kenar konturları (tüm detaylar)
+        edge_konturs = self.kenar_konturlari(edges, scale, offset_x, offset_y, img_h, min_uzunluk=15)
         
-        # ══════════════════════════════════════════════════════════════
-        # KONTURLARI ÇIKAR
-        # ══════════════════════════════════════════════════════════════
+        # Renk konturları
+        gold_konturs = self.konturlari_cikart(gold_mask, scale, offset_x, offset_y, img_h, min_alan=30)
+        red_konturs = self.konturlari_cikart(red_mask, scale, offset_x, offset_y, img_h, min_alan=50)
+        white_konturs = self.konturlari_cikart(white_mask, scale, offset_x, offset_y, img_h, min_alan=20)
         
-        print("\n📐 Konturlar çıkarılıyor...")
+        print(f"   📍 Kenar konturları: {len(edge_konturs)}")
+        print(f"   🟡 Altın konturları: {len(gold_konturs)}")
+        print(f"   🔴 Kırmızı konturları: {len(red_konturs)}")
+        print(f"   ⚪ Beyaz konturları: {len(white_konturs)}")
         
-        gold_konturs = self.konturlari_al(gold_mask, scale, offset_x, offset_y, img_h, min_alan=50)
-        red_konturs = self.konturlari_al(red_mask, scale, offset_x, offset_y, img_h, min_alan=100)
-        white_konturs = self.konturlari_al(white_mask, scale, offset_x, offset_y, img_h, min_alan=30)
-        
-        print(f"   🟡 Altın kontur: {len(gold_konturs)}")
-        print(f"   🔴 Kırmızı kontur: {len(red_konturs)}")
-        print(f"   ⚪ Beyaz kontur: {len(white_konturs)}")
-        
-        # ══════════════════════════════════════════════════════════════
-        # İPLİK RENKLERİ EKLE
-        # ══════════════════════════════════════════════════════════════
+        # ═══════════════════════════════════════════════════════════
+        # İPLİK RENKLERİ
+        # ═══════════════════════════════════════════════════════════
         
         self.pattern.add_thread({"color": 0xD4AF37, "name": "Gold"})
-        self.pattern.add_thread({"color": 0x8B0000, "name": "Dark Red"})
+        self.pattern.add_thread({"color": 0x8B0000, "name": "DarkRed"})
         self.pattern.add_thread({"color": 0xFFFFFF, "name": "White"})
         
-        # ══════════════════════════════════════════════════════════════
-        # AŞAMA 1: TÜM KONTURLARI ÇİZ (ALTIN)
-        # ══════════════════════════════════════════════════════════════
+        # Başlangıç
+        self.pattern.add_stitch_absolute(pyembroidery.STITCH, 0, 0)
+        self.last_x, self.last_y = 0, 0
+        
+        # ═══════════════════════════════════════════════════════════
+        # 1. ALTIN - KONTUR ÇİZ
+        # ═══════════════════════════════════════════════════════════
         
         print("\n" + "-"*70)
         print("🟡 AŞAMA 1: ALTIN KONTURLARI ÇİZİLİYOR...")
         print("-"*70)
         
-        last_x, last_y = None, None
+        gold_konturs = self.sirala_yakin(gold_konturs)
         
-        # Konturları sırala (atlama azalt)
-        gold_konturs = self.noktalar_sirala(gold_konturs, 0, 0)
+        for i, kontur in enumerate(gold_konturs):
+            print(f"   Kontur {i+1}/{len(gold_konturs)}")
+            self.kontur_ciz(kontur)
         
-        for idx, kontur in enumerate(gold_konturs):
-            # Noktaları örnekle (2.5mm aralık)
-            pts = self.resample(kontur, 25)
-            
-            if len(pts) < 3:
+        # Kenar detayları (altın bölgelerde)
+        print("   Kenar detayları ekleniyor...")
+        gold_edges = []
+        for cnt in edge_konturs:
+            if not cnt:
                 continue
-            
-            print(f"   Kontur {idx+1}/{len(gold_konturs)}: {len(pts)} nokta")
-            
-            # Çiz
-            last_x, last_y = self.kontur_ciz(pts, last_x, last_y)
+            # Altın mask içinde mi kontrol et (basit)
+            px = int((cnt[0][0] - offset_x) / scale)
+            py = int(img_h - (cnt[0][1] - offset_y) / scale)
+            if 0 <= px < img_w and 0 <= py < img_h:
+                if gold_mask[py, px] > 0:
+                    gold_edges.append(cnt)
         
-        # ══════════════════════════════════════════════════════════════
-        # AŞAMA 2: ALTIN DOLGU (SATEN)
-        # ══════════════════════════════════════════════════════════════
+        gold_edges = self.sirala_yakin(gold_edges)
+        for kontur in gold_edges[:50]:  # İlk 50 detay
+            self.kontur_ciz(kontur)
+        
+        # ═══════════════════════════════════════════════════════════
+        # 2. ALTIN - SATEN DOLGU
+        # ═══════════════════════════════════════════════════════════
         
         print("\n" + "-"*70)
         print("🟡 AŞAMA 2: ALTIN SATEN DOLGU...")
         print("-"*70)
         
-        gold_konturs2 = self.noktalar_sirala(
-            self.konturlari_al(gold_mask, scale, offset_x, offset_y, img_h, min_alan=50),
-            last_x if last_x else 0,
-            last_y if last_y else 0
+        gold_konturs = self.sirala_yakin(
+            self.konturlari_cikart(gold_mask, scale, offset_x, offset_y, img_h, min_alan=30)
         )
         
-        for idx, kontur in enumerate(gold_konturs2):
-            pts = self.resample(kontur, 20)  # Daha sık
-            
-            if len(pts) < 3:
-                continue
-            
-            print(f"   Saten {idx+1}/{len(gold_konturs2)}")
-            
-            # Saten dolgu (1.5mm genişlik)
-            last_x, last_y = self.saten_doldur(pts, 15, last_x, last_y)
+        for i, kontur in enumerate(gold_konturs):
+            print(f"   Saten {i+1}/{len(gold_konturs)}")
+            self.saten_dolgu(kontur, genislik=18)
         
-        # ══════════════════════════════════════════════════════════════
-        # RENK DEĞİŞTİR -> KIRMIZI
-        # ══════════════════════════════════════════════════════════════
+        # ═══════════════════════════════════════════════════════════
+        # RENK DEĞİŞİM - KIRMIZI
+        # ═══════════════════════════════════════════════════════════
         
         print("\n" + "-"*70)
         print("🔴 AŞAMA 3: KIRMIZI ZEMİN...")
         print("-"*70)
         
+        self.pattern.add_command(pyembroidery.STOP)
         self.pattern.add_command(pyembroidery.TRIM)
         self.pattern.add_command(pyembroidery.COLOR_CHANGE)
         
-        # Önce konturlar
-        red_konturs = self.noktalar_sirala(red_konturs, last_x if last_x else 0, last_y if last_y else 0)
+        # Konturlar
+        red_konturs = self.sirala_yakin(red_konturs)
         
-        for idx, kontur in enumerate(red_konturs):
-            pts = self.resample(kontur, 30)
-            if len(pts) < 3:
-                continue
-            print(f"   Kontur {idx+1}/{len(red_konturs)}")
-            last_x, last_y = self.kontur_ciz(pts, last_x, last_y)
+        for i, kontur in enumerate(red_konturs):
+            print(f"   Kontur {i+1}/{len(red_konturs)}")
+            self.kontur_ciz(kontur)
         
-        # Sonra dolgu
+        # Alan dolgu
         print("   Alan dolgu yapılıyor...")
-        last_x, last_y = self.alan_doldur(red_mask, scale, offset_x, offset_y, satir_aralik=6)
+        self.alan_doldur(red_mask, scale, offset_x, offset_y, img_h, satir_aralik=5)
         
-        # ══════════════════════════════════════════════════════════════
-        # RENK DEĞİŞTİR -> BEYAZ
-        # ══════════════════════════════════════════════════════════════
+        # ═══════════════════════════════════════════════════════════
+        # RENK DEĞİŞİM - BEYAZ
+        # ═══════════════════════════════════════════════════════════
         
         print("\n" + "-"*70)
-        print("⚪ AŞAMA 4: BEYAZ YAZI...")
+        print("⚪ AŞAMA 4: BEYAZ YAZI ve DETAYLAR...")
         print("-"*70)
         
+        self.pattern.add_command(pyembroidery.STOP)
         self.pattern.add_command(pyembroidery.TRIM)
         self.pattern.add_command(pyembroidery.COLOR_CHANGE)
         
-        # Beyaz konturlar
-        white_konturs = self.noktalar_sirala(white_konturs, last_x if last_x else 0, last_y if last_y else 0)
+        # Konturlar
+        white_konturs = self.sirala_yakin(white_konturs)
         
-        for idx, kontur in enumerate(white_konturs):
-            pts = self.resample(kontur, 15)  # Yazı için daha ince
-            if len(pts) < 3:
-                continue
-            print(f"   Kontur {idx+1}/{len(white_konturs)}")
-            last_x, last_y = self.kontur_ciz(pts, last_x, last_y)
+        for i, kontur in enumerate(white_konturs):
+            print(f"   Kontur {i+1}/{len(white_konturs)}")
+            self.kontur_ciz(kontur)
         
-        # Beyaz saten dolgu
+        # Saten dolgu
         print("   Saten dolgu yapılıyor...")
-        white_konturs2 = self.noktalar_sirala(
-            self.konturlari_al(white_mask, scale, offset_x, offset_y, img_h, min_alan=30),
-            last_x if last_x else 0, last_y if last_y else 0
+        white_konturs = self.sirala_yakin(
+            self.konturlari_cikart(white_mask, scale, offset_x, offset_y, img_h, min_alan=20)
         )
         
-        for kontur in white_konturs2:
-            pts = self.resample(kontur, 12)
-            if len(pts) < 3:
+        for kontur in white_konturs:
+            self.saten_dolgu(kontur, genislik=22)
+        
+        # Beyaz kenar detayları
+        print("   Beyaz detaylar ekleniyor...")
+        white_edges = []
+        for cnt in edge_konturs:
+            if not cnt:
                 continue
-            last_x, last_y = self.saten_doldur(pts, 20, last_x, last_y)  # 2mm genişlik
+            px = int((cnt[0][0] - offset_x) / scale)
+            py = int(img_h - (cnt[0][1] - offset_y) / scale)
+            if 0 <= px < img_w and 0 <= py < img_h:
+                if white_mask[py, px] > 0:
+                    white_edges.append(cnt)
         
-        # ══════════════════════════════════════════════════════════════
-        # BİTİR
-        # ══════════════════════════════════════════════════════════════
+        white_edges = self.sirala_yakin(white_edges)
+        for kontur in white_edges[:30]:
+            self.kontur_ciz(kontur)
         
+        # ═══════════════════════════════════════════════════════════
+        # BİTİŞ
+        # ═══════════════════════════════════════════════════════════
+        
+        self.pattern.add_command(pyembroidery.STOP)
         self.pattern.add_command(pyembroidery.TRIM)
         self.pattern.add_command(pyembroidery.END)
         
         # İstatistik
-        total_stitches = len([s for s in self.pattern.stitches if s[2] == pyembroidery.STITCH])
+        stitch_count = len([s for s in self.pattern.stitches if s[2] == pyembroidery.STITCH])
+        stop_count = len([s for s in self.pattern.stitches if s[2] == pyembroidery.STOP])
         
         print("\n" + "="*70)
         print("📊 SONUÇ")
         print("="*70)
-        print(f"   Toplam dikiş: {total_stitches:,}")
-        print(f"   Renk sayısı: 3")
-        print(f"   Boyut: {genislik_cm} x {yukseklik_cm} cm")
+        print(f"   ✅ Toplam dikiş: {stitch_count:,}")
+        print(f"   ⏸️  Stop sayısı: {stop_count}")
+        print(f"   🎨 Renk sayısı: 3")
+        print(f"   📐 Boyut: {genislik_cm} x {yukseklik_cm} cm")
         print("="*70)
 
-    def onizleme_kaydet(self, dosya_adi):
-        """Detaylı önizleme"""
-        fig, ax = plt.subplots(figsize=(16, 12))
+    def onizleme(self, dosya_adi):
+        """Detaylı önizleme kaydet"""
+        fig, ax = plt.subplots(figsize=(18, 14))
         ax.set_aspect('equal')
         
         renkler = ['#D4AF37', '#8B0000', '#FFFFFF']
         renk_idx = 0
         
-        xs, ys = [], []
         segments = []
+        xs, ys = [], []
+        stops = []
         
         for stitch in self.pattern.stitches:
             x, y, cmd = stitch
@@ -496,6 +601,12 @@ class LogoNakis:
                     segments.append((list(xs), list(ys), renkler[renk_idx % 3]))
                 xs, ys = [], []
                 
+            elif cmd == pyembroidery.STOP:
+                stops.append((x, y))
+                if xs:
+                    segments.append((list(xs), list(ys), renkler[renk_idx % 3]))
+                xs, ys = [], []
+                
             elif cmd == pyembroidery.STITCH:
                 xs.append(x)
                 ys.append(y)
@@ -507,33 +618,38 @@ class LogoNakis:
         if xs:
             segments.append((xs, ys, renkler[renk_idx % 3]))
         
-        # Çiz
+        # Segmentleri çiz
         for xs, ys, color in segments:
             if len(xs) > 1:
-                ax.plot(xs, ys, color=color, linewidth=0.4, alpha=0.9)
+                ax.plot(xs, ys, color=color, linewidth=0.5, alpha=0.9)
+        
+        # Stop noktalarını göster
+        if stops:
+            sx, sy = zip(*stops)
+            ax.scatter(sx, sy, c='cyan', s=15, marker='s', zorder=10, label='STOP')
         
         ax.set_facecolor('#1a1a1a')
         fig.patch.set_facecolor('#1a1a1a')
         
-        ax.set_title('TATLI DURAĞI - Nakış Önizleme', color='white', fontsize=16, fontweight='bold')
+        ax.set_title('TATLI DURAĞI - Nakış Önizleme (STOP noktaları cyan)', 
+                     color='white', fontsize=16, fontweight='bold')
         ax.tick_params(colors='gray')
+        ax.legend(loc='upper right', facecolor='#333', edgecolor='white', labelcolor='white')
         
         for spine in ax.spines.values():
             spine.set_color('gray')
         
         plt.tight_layout()
-        plt.savefig(f"{dosya_adi}_onizleme.png", dpi=250, facecolor='#1a1a1a', edgecolor='none')
+        plt.savefig(f"{dosya_adi}_onizleme.png", dpi=300, facecolor='#1a1a1a')
         plt.close()
         
-        print(f"🖼️  Önizleme kaydedildi: {dosya_adi}_onizleme.png")
+        print(f"🖼️  Önizleme: {dosya_adi}_onizleme.png")
 
     def kaydet(self, dosya_adi):
-        """Tüm formatları kaydet"""
+        """Dosyaları kaydet"""
         
-        # Önizleme
-        self.onizleme_kaydet(dosya_adi)
+        self.onizleme(dosya_adi)
         
-        # Pattern normalize
         pattern = self.pattern.get_normalized_pattern()
         
         formatlar = [
@@ -553,28 +669,28 @@ class LogoNakis:
             except Exception as e:
                 print(f"   ❌ {ext}: {e}")
         
-        print("\n✅ İŞLEM TAMAMLANDI!")
+        print("\n✅ TAMAMLANDI!")
 
 
-# ══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
 # ANA PROGRAM
-# ══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
     
     nakis = LogoNakis()
     
-    # ╔════════════════════════════════════════════════════════════════════════╗
-    # ║                           AYARLAR                                       ║
-    # ╠════════════════════════════════════════════════════════════════════════╣
-    # ║  LOGO_DOSYASI  : Logo görüntü dosyası                                  ║
-    # ║  GENISLIK_CM   : Nakış genişliği (cm)                                  ║
-    # ║  YUKSEKLIK_CM  : Nakış yüksekliği (cm)                                 ║
-    # ╚════════════════════════════════════════════════════════════════════════╝
+    # ╔═════════════════════════════════════════════════════════════════════════╗
+    # ║                              AYARLAR                                     ║
+    # ╠═════════════════════════════════════════════════════════════════════════╣
+    # ║  LOGO_DOSYASI  : Logo görüntü dosyanızın yolu                           ║
+    # ║  GENISLIK_CM   : Nakış genişliği (cm)                                   ║
+    # ║  YUKSEKLIK_CM  : Nakış yüksekliği (cm)                                  ║
+    # ╚═════════════════════════════════════════════════════════════════════════╝
     
-    LOGO_DOSYASI = "logo.png"
-    GENISLIK_CM = 15
-    YUKSEKLIK_CM = 10
+    LOGO_DOSYASI = "logo.png"      # ← Logo dosyanızın adı
+    GENISLIK_CM = 12               # ← Genişlik (cm)
+    YUKSEKLIK_CM = 7              # ← Yükseklik (cm)
     
     # İşle
     nakis.logo_isle(
