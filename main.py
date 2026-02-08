@@ -371,8 +371,8 @@ if __name__ == "__main__":
     # AYARLAR (İSTEDİĞİNİZ GİBİ DEĞİŞTİRİN)
     # ========================================
     
-    MUSTERI_ISMI = "Mehmet Öz 2025"
-    BOYUT = 1.5
+    MUSTERI_ISMI = "SELMAN"
+    BOYUT = 5.5
     BIRIM = "cm"
     
     # ========================================
