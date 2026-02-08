@@ -683,8 +683,8 @@ if __name__ == '__main__':
                               # None yaparsanız otomatik hesaplar
     
     # Yazı tipi ayarları (sadece birini True yapın, veya bold+italic birlikte)
-    NORMAL = False            # Normal yazı
-    BOLD   = True             # Kalın yazı
+    NORMAL = True            # Normal yazı
+    BOLD   = False             # Kalın yazı
     ITALIC = False            # Eğik yazı
     
     # ═══════════════════════════════════════════════════════════════
