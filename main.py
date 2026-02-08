@@ -671,7 +671,7 @@ if __name__ == '__main__':
     #  AYARLAR
     # ═══════════════════════════════════════════════════════════════
     
-    ISIM  = "SELMSN"
+    ISIM  = "SELMAN"
     BIRIM = "cm"              # "cm" veya "mm"
     
     # Alan ayarları
