@@ -1,17 +1,22 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Logo Nakış Dönüştürücü (sadece logo işler)
-- logo.png içindeki konturları çıkarır
-- Alana (genişlik x yükseklik) otomatik sığdırır, merkeze yerleştirir
-- Konturları running stitch ile çizer (JUMP → STITCH… → TRIM)
+Logo'dan Nakış (PNG → DST/JEF)
+- logo.png içindeki siyah bölgeleri alır
+- Alana (genişlik x yükseklik) otomatik sığdırır, ortalar
+- İki mod:
+    1) Kontur (outline) → running stitch
+    2) Dolgu (hatch)    → yatay tarama çizgileri, running stitch
 - Çıktılar: .dst, .jef ve önizleme .jpg
+
+Gereken kütüphaneler:
+  pip install pyembroidery pillow numpy opencv-python-headless matplotlib
 """
 
 import math
+import numpy as np
 import pyembroidery
 import matplotlib.pyplot as plt
-import numpy as np
 from PIL import Image
 
 try:
@@ -22,7 +27,7 @@ except ImportError as e:
     ) from e
 
 
-class NakisLogo:
+class LogoNakis:
     def __init__(self):
         self.pattern = pyembroidery.EmbPattern()
 
@@ -31,7 +36,7 @@ class NakisLogo:
         return math.hypot(x2 - x1, y2 - y1)
 
     def _resample_polyline(self, pts, step):
-        """Polylini yaklaşık eşit aralıklı noktalarla örnekle"""
+        """Polylini (emb birimlerinde) yaklaşık eşit aralıklı noktalarla örnekler."""
         if len(pts) < 2:
             return pts
         res = [pts[0]]
@@ -39,16 +44,16 @@ class NakisLogo:
         for i in range(1, len(pts)):
             x0, y0 = pts[i - 1]
             x1, y1 = pts[i]
-            seg_len = self._mesafe(x0, y0, x1, y1)
-            if seg_len < 1e-6:
+            seg = self._mesafe(x0, y0, x1, y1)
+            if seg < 1e-6:
                 continue
-            dirx = (x1 - x0) / seg_len
-            diry = (y1 - y0) / seg_len
-            dist = seg_len
+            ux = (x1 - x0) / seg
+            uy = (y1 - y0) / seg
+            dist = seg
             while acc + dist >= step:
                 need = step - acc
-                nx = x0 + dirx * need
-                ny = y0 + diry * need
+                nx = x0 + ux * need
+                ny = y0 + uy * need
                 res.append((nx, ny))
                 dist -= need
                 x0, y0 = nx, ny
@@ -58,40 +63,130 @@ class NakisLogo:
             res.append(pts[-1])
         return res
 
-    # ── Logo Dikme ──────────────────────────────────────────────
-    def logo_dik(
+    def _jump(self, x, y):
+        self.pattern.add_stitch_absolute(pyembroidery.JUMP, int(x), int(y))
+
+    def _stitch(self, x, y):
+        self.pattern.add_stitch_absolute(pyembroidery.STITCH, int(x), int(y))
+
+    def _trim(self, x, y):
+        self.pattern.add_stitch_absolute(pyembroidery.TRIM, int(x), int(y))
+
+    # ── Kontur Çizimi (Outline) ──────────────────────────────────
+    def _ciz_outline(self, contours, min_x, min_y, src_w, src_h,
+                     scale, ox, oy, resample_step, min_contour_len):
+        for cnt in contours:
+            if len(cnt) < min_contour_len:
+                continue
+            approx = cv2.approxPolyDP(cnt, epsilon=2.0, closed=True)
+            pts_img = [(p[0][0], p[0][1]) for p in approx]
+
+            # Kapalı yap
+            if pts_img[0] != pts_img[-1]:
+                pts_img.append(pts_img[0])
+
+            # Görüntü pikselinden nakış koordinatına (y ekseni ters)
+            pts_emb = []
+            for x, y in pts_img:
+                ex = ox + (x - min_x) * scale
+                ey = oy + (src_h - (y - min_y)) * scale
+                pts_emb.append((ex, ey))
+
+            # Yeniden örnekle
+            pts_emb = self._resample_polyline(pts_emb, resample_step)
+            if len(pts_emb) < 2:
+                continue
+
+            # JUMP → STITCH* → TRIM
+            self._jump(pts_emb[0][0], pts_emb[0][1])
+            for pt in pts_emb[1:]:
+                self._stitch(pt[0], pt[1])
+            self._trim(pts_emb[-1][0], pts_emb[-1][1])
+
+    # ── Dolgu (Hatch) ────────────────────────────────────────────
+    def _ciz_hatch(self, mask, min_x, min_y, src_w, src_h,
+                   scale, ox, oy, hatch_step_px, stitch_step_emb):
+        """
+        mask: binary (255 logo içi, 0 dışı)
+        hatch_step_px: görüntü pikselinde tarama satır aralığı
+        stitch_step_emb: nakış biriminde dikiş adımı
+        """
+        h, w = mask.shape
+        for row in range(0, h, hatch_step_px):
+            line = mask[row, :]
+            # Geçişleri bul (1 bloklarını)
+            inside = False
+            segments = []
+            start = 0
+            for col in range(w):
+                val = line[col] > 0
+                if val and not inside:
+                    inside = True
+                    start = col
+                if not val and inside:
+                    inside = False
+                    end = col - 1
+                    segments.append((start, end))
+            if inside:
+                segments.append((start, w - 1))
+            # Her segmenti dikişle
+            for seg in segments:
+                x0, x1 = seg
+                if x1 <= x0:
+                    continue
+                # Emb koordinatına dön
+                px0, py0 = x0, row
+                px1, py1 = x1, row
+                ex0 = ox + (px0 - min_x) * scale
+                ey0 = oy + (src_h - (py0 - min_y)) * scale
+                ex1 = ox + (px1 - min_x) * scale
+                ey1 = oy + (src_h - (py1 - min_y)) * scale
+                # Yeniden örnekle (baş-son dahil)
+                pts = [(ex0, ey0), (ex1, ey1)]
+                pts = self._resample_polyline(pts, stitch_step_emb)
+                # JUMP başa, STITCH boyunca, TRIM sonda
+                self._jump(pts[0][0], pts[0][1])
+                for p in pts[1:]:
+                    self._stitch(p[0], p[1])
+                self._trim(pts[-1][0], pts[-1][1])
+
+    # ── Ana İşlev ────────────────────────────────────────────────
+    def logo_isle(
         self,
-        image_path,
-        baslangic_x,
-        baslangic_y,
-        genislik,
-        yukseklik,
+        image_path="logo.png",
+        baslangic_x=0,
+        baslangic_y=0,
+        genislik=15,
+        yukseklik=5,
         birim="cm",
         threshold=200,
-        simplify_epsilon=2.0,
-        adim=8,  # 0.8 mm dikiş aralığı (adim birimi: 0.1 mm)
+        outline=True,
+        fill=True,
+        hatch_step_mm=1.2,     # 1.2 mm satır aralığı
+        stitch_step_mm=0.8,    # 0.8 mm dikiş aralığı
         min_contour_len=8,
     ):
         """
-        Raster logo dosyasını kontur bazlı running stitch ile alana sığdırır.
+        PNG logoyu alana sığdırıp nakışa çevirir.
         """
+        # Birim dönüşümü: 1 cm = 100, 1 mm = 10 (pyembroidery 0.1mm grid)
         if birim == "cm":
-            birim_carpan = 100
+            k = 100
         elif birim == "mm":
-            birim_carpan = 10
+            k = 10
         else:
-            birim_carpan = 100
+            k = 100
 
-        target_w = genislik * birim_carpan
-        target_h = yukseklik * birim_carpan
-        bx = baslangic_x * birim_carpan
-        by = baslangic_y * birim_carpan
+        target_w = genislik * k
+        target_h = yukseklik * k
+        bx = baslangic_x * k
+        by = baslangic_y * k
 
-        # Görüntüyü yükle ve griye çevir
+        # Görüntü yükle
         img = Image.open(image_path).convert("L")
         arr = np.array(img)
 
-        # Eşikleme (beyaz zemin, siyah logo varsayımı)
+        # Eşikleme (siyah logo, beyaz zemin)
         _, binary = cv2.threshold(arr, threshold, 255, cv2.THRESH_BINARY_INV)
 
         # Kontur bul
@@ -100,70 +195,59 @@ class NakisLogo:
             print("⚠️ Kontur bulunamadı.")
             return
 
-        # Tüm konturların birleşik bounding box'ı
-        all_pts = []
-        for cnt in contours:
-            for p in cnt:
-                all_pts.append((p[0][0], p[0][1]))
-        min_x = min(p[0] for p in all_pts)
-        max_x = max(p[0] for p in all_pts)
-        min_y = min(p[1] for p in all_pts)
-        max_y = max(p[1] for p in all_pts)
-
+        # Birleşik bbox
+        pts_all = [(p[0][0], p[0][1]) for c in contours for p in c]
+        min_x = min(p[0] for p in pts_all)
+        max_x = max(p[0] for p in pts_all)
+        min_y = min(p[1] for p in pts_all)
+        max_y = max(p[1] for p in pts_all)
         src_w = max_x - min_x
         src_h = max_y - min_y
         if src_w < 1 or src_h < 1:
             print("⚠️ Görüntü boyutu geçersiz.")
             return
 
-        sc = min(target_w / src_w, target_h / src_h)
+        # Ölçek ve ortalama
+        scale = min(target_w / src_w, target_h / src_h)
+        ox = bx + (target_w - src_w * scale) / 2.0
+        oy = by + (target_h - src_h * scale) / 2.0
 
-        # Ortalamak için offset
-        ox = bx + (target_w - src_w * sc) / 2.0
-        oy = by + (target_h - src_h * sc) / 2.0
+        print(f"🖼️ Logo: {image_path}")
+        print(f"📏 Ölçek: {scale / k:.2f} {birim}")
+        print(f"📦 Hedef: {genislik} x {yukseklik} {birim}")
 
-        print(f"  🖼️ Logo: {image_path}")
-        print(f"  📏 Ölçek: {sc / birim_carpan:.2f} {birim}")
-        print(f"  📦 Hedef: {genislik}x{yukseklik} {birim}")
+        # Adımlar (emb birimi: 0.1 mm)
+        stitch_step_emb = stitch_step_mm * 10
+        hatch_step_px = max(1, int(round(hatch_step_mm * 10 / scale)))  # px cinsinden satır aralığı
 
-        # Her konturu işle
-        for cnt in contours:
-            if len(cnt) < min_contour_len:
-                continue
-            approx = cv2.approxPolyDP(cnt, simplify_epsilon, True)
-            pts = [(p[0][0], p[0][1]) for p in approx]
-
-            # Kapalı konturu kapat
-            if pts[0] != pts[-1]:
-                pts.append(pts[0])
-
-            # Ölçekle ve y-ekseni çevir (görüntüde y aşağı, alanda yukarı)
-            scaled = []
-            for x, y in pts:
-                x_s = ox + (x - min_x) * sc
-                y_s = oy + (src_h - (y - min_y)) * sc
-                scaled.append((x_s, y_s))
-
-            # Eşit aralıklı örnekleme
-            sampled = self._resample_polyline(scaled, adim)
-            if len(sampled) < 2:
-                continue
-
-            # JUMP ilk noktaya
-            self.pattern.add_stitch_absolute(
-                pyembroidery.JUMP, int(sampled[0][0]), int(sampled[0][1])
+        # Dolgu (hatch)
+        if fill:
+            self._ciz_hatch(
+                mask=binary,
+                min_x=min_x,
+                min_y=min_y,
+                src_w=src_w,
+                src_h=src_h,
+                scale=scale,
+                ox=ox,
+                oy=oy,
+                hatch_step_px=hatch_step_px,
+                stitch_step_emb=stitch_step_emb,
             )
 
-            # Running stitch kontur boyunca
-            for pt in sampled[1:]:
-                self.pattern.add_stitch_absolute(
-                    pyembroidery.STITCH, int(pt[0]), int(pt[1])
-                )
-
-            # TRIM kontur sonu
-            last = sampled[-1]
-            self.pattern.add_stitch_absolute(
-                pyembroidery.TRIM, int(last[0]), int(last[1])
+        # Kontur
+        if outline:
+            self._ciz_outline(
+                contours=contours,
+                min_x=min_x,
+                min_y=min_y,
+                src_w=src_w,
+                src_h=src_h,
+                scale=scale,
+                ox=ox,
+                oy=oy,
+                resample_step=stitch_step_emb,
+                min_contour_len=min_contour_len,
             )
 
     # ── Önizleme ─────────────────────────────────────────────────
@@ -186,7 +270,7 @@ class NakisLogo:
         plt.title(ad, fontsize=13)
         plt.savefig(f"{ad}.jpg", dpi=300, bbox_inches="tight")
         plt.close()
-        print(f"  Önizleme → {ad}.jpg")
+        print(f"🖼️ Önizleme → {ad}.jpg")
 
     # ── Kaydet ───────────────────────────────────────────────────
     def kaydet(self, isim):
@@ -199,38 +283,40 @@ class NakisLogo:
 
 
 # ══════════════════════════════════════════════════════════════════
-#  KULLANIM
+#  ÇALIŞTIRMA
 # ══════════════════════════════════════════════════════════════════
 if __name__ == "__main__":
-    m = NakisLogo()
+    m = LogoNakis()
 
     # Parametreler
-    BIRIM = "cm"
-    LOGO_DOSYA = "logo.png"
-    GENISLIK = 15    # cm
-    YUKSEKLIK = 5    # cm
-    BASLANGIC_X = 0  # cm
-    BASLANGIC_Y = 0  # cm
+    LOGO_DOSYA   = "logo.png"
+    BIRIM        = "cm"
+    GENISLIK_CM  = 15   # hedef genişlik
+    YUKSEKLIK_CM = 5    # hedef yükseklik
+    BAS_X        = 0
+    BAS_Y        = 0
 
-    # Kontur/işleme ayarları
+    # Dolgu ve kontur ayarları
     THRESHOLD = 200
-    SIMPLIFY_EPS = 2.0
-    ADIM = 8              # 0.8 mm dikiş aralığı
+    OUTLINE   = True
+    FILL      = True
+    HATCH_STEP_MM   = 1.2   # hatch satır aralığı
+    STITCH_STEP_MM  = 0.8   # dikiş aralığı
     MIN_CONTOUR_LEN = 8
 
-    # Logo işle
-    m.logo_dik(
+    m.logo_isle(
         image_path=LOGO_DOSYA,
-        baslangic_x=BASLANGIC_X,
-        baslangic_y=BASLANGIC_Y,
-        genislik=GENISLIK,
-        yukseklik=YUKSEKLIK,
+        baslangic_x=BAS_X,
+        baslangic_y=BAS_Y,
+        genislik=GENISLIK_CM,
+        yukseklik=YUKSEKLIK_CM,
         birim=BIRIM,
         threshold=THRESHOLD,
-        simplify_epsilon=SIMPLIFY_EPS,
-        adim=ADIM,
+        outline=OUTLINE,
+        fill=FILL,
+        hatch_step_mm=HATCH_STEP_MM,
+        stitch_step_mm=STITCH_STEP_MM,
         min_contour_len=MIN_CONTOUR_LEN,
     )
 
-    # Kaydet
     m.kaydet("logo")
