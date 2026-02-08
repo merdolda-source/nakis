@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Profesyonel Nakış Yazı Makinesi v4
+Profesyonel Nakış Yazı Makinesi v5
 Her harf: 1 JUMP → Underlay ileri → Sargı geri → 1 TRIM
 Harf içinde sıfır atlama, sıfır duraksama
-YENİ: Belirtilen alana (genişlik x yükseklik) otomatik sığdırma
+YENİ: 
+  - Belirtilen alana (genişlik x yükseklik) otomatik sığdırma
+  - Ayarlanabilir harf aralığı
+  - Yazı tipi: Normal, Bold, Italic
 """
 
 import pyembroidery
@@ -60,6 +63,18 @@ class ProfesyonelNakis:
         self.pattern.add_stitch_absolute(pyembroidery.STITCH, int(x2), int(y2))
         return (x2, y2)
 
+    # ── Italic Dönüşümü ──────────────────────────────────────────
+
+    def _italic_donustur(self, cizgiler, egim=0.25):
+        """Çizgileri italic (eğik) yapar - x += y * egim"""
+        italic_cizgiler = []
+        for a, b, c, d in cizgiler:
+            # Her noktanın x koordinatını y'ye göre kaydır
+            a_new = a + b * egim
+            c_new = c + d * egim
+            italic_cizgiler.append((a_new, b, c_new, d))
+        return italic_cizgiler
+
     # ── Harf Dikme ───────────────────────────────────────────────
 
     def _harf_dik(self, cizgiler, mx, by, scale, gx, yx, kalinlik):
@@ -99,11 +114,10 @@ class ProfesyonelNakis:
 
     # ── Metin Boyutlarını Hesapla ────────────────────────────────
 
-    def _metin_boyut_hesapla(self, metin):
+    def _metin_boyut_hesapla(self, metin, harf_araligi_oran, italic=False):
         """Metnin normalize edilmiş genişlik ve yükseklik oranlarını hesapla"""
         BG, KG, KY, SG = 0.70, 0.55, 0.60, 0.65
         
-        # Harf sözlükleri (sadece var olup olmadığını kontrol için)
         buyuk_harfler = set('ABCDEFGHIJKLMNOPQRSTUVWXYZ')
         kucuk_harfler = set('abcdefghijklmnopqrstuvwxyz')
         tr_buyuk = set('ÇĞİÖŞÜ')
@@ -112,11 +126,11 @@ class ProfesyonelNakis:
         ozel_set = set('-.,!?/:#')
         
         toplam_genislik = 0
-        max_yukseklik = 1.0  # Normalize edilmiş yükseklik
-        min_y = 0  # Alt sınır (g, y gibi harfler için)
-        max_y = 1.0  # Üst sınır
+        max_yukseklik = 1.0
+        min_y = 0
+        max_y = 1.0
         
-        ara_oran = 0.25  # Harfler arası boşluk oranı
+        harf_sayisi = 0
         
         for i, harf in enumerate(metin):
             if harf == ' ':
@@ -151,9 +165,16 @@ class ProfesyonelNakis:
                 gx = 0.3
             
             toplam_genislik += gx
-            # Son harf değilse ara boşluk ekle
-            if i < len(metin) - 1 and metin[i + 1] != ' ':
-                toplam_genislik += ara_oran
+            harf_sayisi += 1
+        
+        # Harf aralıklarını ekle (son harften sonra ekleme)
+        if harf_sayisi > 1:
+            toplam_genislik += harf_araligi_oran * (harf_sayisi - 1)
+        
+        # Italic için ekstra genişlik (eğim nedeniyle)
+        if italic:
+            italic_ekstra = max_y * 0.25  # Eğim oranı kadar ekstra
+            toplam_genislik += italic_ekstra
         
         toplam_yukseklik = max_y - min_y
         
@@ -162,80 +183,135 @@ class ProfesyonelNakis:
     # ── İsim Yazma (Alana Sığdırmalı) ────────────────────────────
 
     def isim_yaz(self, metin, baslangic_x, baslangic_y, boyut=None, birim="cm",
-                 genislik=None, yukseklik=None):
+                 genislik=None, yukseklik=None, harf_araligi=None,
+                 normal=True, bold=False, italic=False):
         """
         Metin yazar.
-        
-        Kullanım 1 - Sadece boyut ile (eski yöntem):
-            isim_yaz("Mehmet", 0, 0, boyut=2, birim="cm")
-        
-        Kullanım 2 - Alana sığdırma (yeni yöntem):
-            isim_yaz("Mehmet", 0, 0, genislik=10, yukseklik=2, birim="cm")
         
         Parametreler:
             metin: Yazılacak metin
             baslangic_x, baslangic_y: Başlangıç koordinatları
             boyut: Harf yüksekliği (eski yöntem)
             birim: "cm" veya "mm"
-            genislik: İstenen toplam genişlik (yeni yöntem)
-            yukseklik: İstenen toplam yükseklik (yeni yöntem)
+            genislik: İstenen toplam genişlik
+            yukseklik: İstenen toplam yükseklik
+            harf_araligi: Harfler arası mesafe (cm veya mm, birime göre)
+                          None ise otomatik (harf yüksekliğinin %25'i)
+            normal: Normal yazı tipi (True/False)
+            bold: Kalın yazı tipi (True/False)
+            italic: Eğik yazı tipi (True/False)
+        
+        Örnekler:
+            # Normal yazı, 1cm harf aralığı
+            isim_yaz("Test", 0, 0, genislik=10, yukseklik=2, harf_araligi=1, normal=True)
+            
+            # Bold yazı, 0.5cm harf aralığı
+            isim_yaz("Test", 0, 0, genislik=10, yukseklik=2, harf_araligi=0.5, bold=True)
+            
+            # Italic yazı
+            isim_yaz("Test", 0, 0, genislik=10, yukseklik=2, italic=True)
+            
+            # Bold + Italic
+            isim_yaz("Test", 0, 0, genislik=10, yukseklik=2, bold=True, italic=True)
         """
         
         # Birim dönüşümü
         if birim == "cm":
-            birim_carpan = 100  # cm -> 0.1mm (pyembroidery birimi)
+            birim_carpan = 100
         elif birim == "mm":
-            birim_carpan = 10   # mm -> 0.1mm
+            birim_carpan = 10
         else:
             birim_carpan = 100
         
         bx = baslangic_x * birim_carpan
         by = baslangic_y * birim_carpan
         
+        # Yazı tipi kalınlık çarpanı
+        if bold:
+            kalinlik_carpan = 1.8  # Bold için %80 daha kalın
+        else:
+            kalinlik_carpan = 1.0  # Normal
+        
+        # Harf aralığı hesaplama
+        # Geçici ölçek için önce boyut veya alan bazlı hesap yap
+        if genislik is not None and yukseklik is not None:
+            # Alana sığdırma - geçici ölçek tahmini
+            gecici_olcek = min(genislik, yukseklik) * birim_carpan
+        elif boyut is not None:
+            gecici_olcek = boyut * (10 if birim == "cm" else 1) * 10
+        else:
+            gecici_olcek = 200  # Varsayılan 2cm
+        
+        # Harf aralığı oranı hesapla
+        if harf_araligi is not None:
+            # Kullanıcı belirli bir aralık verdi (cm veya mm)
+            harf_araligi_px = harf_araligi * birim_carpan
+            # Oranı hesapla (ölçeğe göre normalize et)
+            harf_araligi_oran = harf_araligi_px / gecici_olcek if gecici_olcek > 0 else 0.25
+        else:
+            # Varsayılan: harf yüksekliğinin %25'i
+            harf_araligi_oran = 0.25
+        
         # Metin boyutlarını hesapla
-        metin_gen_oran, metin_yuk_oran, min_y_oran = self._metin_boyut_hesapla(metin)
+        metin_gen_oran, metin_yuk_oran, min_y_oran = self._metin_boyut_hesapla(
+            metin, harf_araligi_oran, italic)
         
         # Boyut hesaplama
         if genislik is not None and yukseklik is not None:
-            # Alana sığdırma modu
             gen_px = genislik * birim_carpan
             yuk_px = yukseklik * birim_carpan
             
-            # Her iki boyuta göre ölçek hesapla, küçük olanı seç
             olcek_gen = gen_px / metin_gen_oran if metin_gen_oran > 0 else gen_px
             olcek_yuk = yuk_px / metin_yuk_oran if metin_yuk_oran > 0 else yuk_px
             
             sc = min(olcek_gen, olcek_yuk)
             
-            # Merkeze hizalama için offset hesapla
+            # Harf aralığını yeniden hesapla (gerçek ölçeğe göre)
+            if harf_araligi is not None:
+                ara = harf_araligi * birim_carpan
+            else:
+                ara = sc * 0.25
+            
             gercek_gen = metin_gen_oran * sc
             gercek_yuk = metin_yuk_oran * sc
             
-            # X ekseni merkezleme
             x_offset = (gen_px - gercek_gen) / 2
             bx += x_offset
             
-            # Y ekseni merkezleme (min_y'yi hesaba kat)
             y_offset = (yuk_px - gercek_yuk) / 2 - (min_y_oran * sc)
             by += y_offset
             
-            harf_mm = sc / 10  # Kalınlık hesabı için
+            harf_mm = sc / 10
             
             print(f"  📐 Alan: {genislik}x{yukseklik} {birim}")
             print(f"  📏 Hesaplanan ölçek: {sc/birim_carpan:.2f} {birim}")
             print(f"  📦 Gerçek boyut: {gercek_gen/birim_carpan:.2f}x{gercek_yuk/birim_carpan:.2f} {birim}")
+            print(f"  📝 Harf aralığı: {ara/birim_carpan:.2f} {birim}")
+            yazi_tipi = []
+            if bold:
+                yazi_tipi.append("Bold")
+            if italic:
+                yazi_tipi.append("Italic")
+            if not yazi_tipi:
+                yazi_tipi.append("Normal")
+            print(f"  🔤 Yazı tipi: {' + '.join(yazi_tipi)}")
             
         elif boyut is not None:
-            # Eski yöntem - sadece boyut
             harf_mm = boyut * (10 if birim == "cm" else 1)
             sc = harf_mm * 10
+            if harf_araligi is not None:
+                ara = harf_araligi * birim_carpan
+            else:
+                ara = sc * 0.25
         else:
-            # Varsayılan
-            harf_mm = 20  # 2cm
+            harf_mm = 20
             sc = harf_mm * 10
+            if harf_araligi is not None:
+                ara = harf_araligi * birim_carpan
+            else:
+                ara = sc * 0.25
 
         mx = bx
-        ara = sc * 0.25
         BG, KG, KY, SG = 0.70, 0.55, 0.60, 0.65
 
         # ═══════════════════════════════════════════════════════════
@@ -510,8 +586,9 @@ class ProfesyonelNakis:
                   (0.95, 0.65, 0.05, 0.65)],
         }
 
-        # ── Sargı kalınlığı ──
-        kalinlik = max(2.0, min(5.0, harf_mm * 0.13))
+        # ── Sargı kalınlığı (Bold için artır) ──
+        base_kalinlik = max(2.0, min(5.0, harf_mm * 0.13))
+        kalinlik = base_kalinlik * kalinlik_carpan
 
         # ── Harf harf dik ──
         for harf in metin:
@@ -539,6 +616,10 @@ class ProfesyonelNakis:
             if not ciz:
                 mx += sc * 0.3
                 continue
+
+            # Italic dönüşümü uygula
+            if italic:
+                ciz = self._italic_donustur(ciz, egim=0.25)
 
             self._harf_dik(ciz, mx, by, sc, gx, yx, kalinlik)
             mx += (sc * gx) + ara
@@ -584,22 +665,38 @@ if __name__ == '__main__':
 
     m = ProfesyonelNakis()
 
-    # ─── AYARLAR ──────────────────────────────────────────────────
+    # ═══════════════════════════════════════════════════════════════
+    #  AYARLAR
+    # ═══════════════════════════════════════════════════════════════
+    
     ISIM  = "SELMAN"
-    BIRIM = "cm"             # "cm" veya "mm"
+    BIRIM = "cm"              # "cm" veya "mm"
+    
+    # Alan ayarları
+    GENISLIK = 15             # Toplam genişlik (cm veya mm)
+    YUKSEKLIK = 3             # Toplam yükseklik (cm veya mm)
+    
+    # Harf aralığı ayarı
+    HARF_ARALIGI = 0.5        # Harfler arası mesafe (cm veya mm)
+                              # None yaparsanız otomatik hesaplar
+    
+    # Yazı tipi ayarları (sadece birini True yapın, veya bold+italic birlikte)
+    NORMAL = False            # Normal yazı
+    BOLD   = False             # Kalın yazı
+    ITALIC = True            # Eğik yazı
     
     # ═══════════════════════════════════════════════════════════════
-    # YENİ ÖZELLİK: Alana Sığdırma
-    # ═══════════════════════════════════════════════════════════════
-    # Seçenek 1: Sadece boyut ver (eski yöntem)
-    # m.isim_yaz(ISIM, 0, 0, boyut=2.5, birim=BIRIM)
     
-    # Seçenek 2: Genişlik ve yükseklik ver (yeni yöntem)
-    # Yazı bu alana sığacak şekilde otomatik ölçeklenir
-    GENISLIK = 36   # cm (veya mm, BIRIM'e göre)
-    YUKSEKLIK = 25   # cm (veya mm, BIRIM'e göre)
+    m.isim_yaz(
+        ISIM, 
+        0, 0,
+        genislik=GENISLIK,
+        yukseklik=YUKSEKLIK,
+        harf_araligi=HARF_ARALIGI,
+        birim=BIRIM,
+        normal=NORMAL,
+        bold=BOLD,
+        italic=ITALIC
+    )
     
-    m.isim_yaz(ISIM, 0, 0, genislik=GENISLIK, yukseklik=YUKSEKLIK, birim=BIRIM)
-    # ──────────────────────────────────────────────────────────────
-
     m.kaydet(ISIM)
