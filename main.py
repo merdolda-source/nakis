@@ -10,7 +10,7 @@ class ProfesyonelNakis:
     def _mesafe(self, x1, y1, x2, y2):
         return math.sqrt((x2 - x1)**2 + (y2 - y1)**2)
 
-    def tam_sargi_yap(self, x1, y1, x2, y2, kalinlik_mm):
+    def tam_sargi_yap(self, x1, y1, x2, y2, kalinlik_mm, ilk_segment=True):
         genislik = kalinlik_mm * 10
         dx = x2 - x1
         dy = y2 - y1
@@ -22,30 +22,44 @@ class ProfesyonelNakis:
         nx = -dy / dist * (genislik / 2)
         ny = dx / dist * (genislik / 2)
 
-        # === 1. ALT DOLGU (UNDERLAY) ===
-        kucultme = 0.7
+        # Sadece harfin ilk segmentinde JUMP yap, diğerlerinde STITCH ile bağlan
+        if ilk_segment:
+            self.pattern.add_stitch_absolute(pyembroidery.JUMP, int(x1), int(y1))
+        else:
+            self.pattern.add_stitch_absolute(pyembroidery.STITCH, int(x1), int(y1))
+
+        # === 1. ALT DOLGU (UNDERLAY) - ZİGZAG ===
+        kucultme = 0.6
         nx_alt = nx * kucultme
         ny_alt = ny * kucultme
-
-        self.pattern.add_stitch_absolute(pyembroidery.JUMP, int(x1), int(y1))
         
-        steps_alt = int(dist // 30) + 1
+        steps_alt = int(dist // 20) + 1
         for i in range(steps_alt + 1):
-            self.pattern.add_stitch_absolute(pyembroidery.STITCH, int(x1 + dx * i / steps_alt), int(y1 + dy * i / steps_alt))
+            ratio = i / steps_alt
+            cx = x1 + dx * ratio
+            cy = y1 + dy * ratio
+            if i % 2 == 0:
+                self.pattern.add_stitch_absolute(pyembroidery.STITCH, int(cx + nx_alt), int(cy + ny_alt))
+            else:
+                self.pattern.add_stitch_absolute(pyembroidery.STITCH, int(cx - nx_alt), int(cy - ny_alt))
         
-        self.pattern.add_stitch_absolute(pyembroidery.STITCH, int(x1), int(y1))
+        # Geri dön
+        self.pattern.add_stitch_absolute(pyembroidery.STITCH, int(x2), int(y2))
+        steps_geri = int(dist // 25) + 1
+        for i in range(steps_geri + 1):
+            ratio = i / steps_geri
+            cx = x2 - dx * ratio
+            cy = y2 - dy * ratio
+            self.pattern.add_stitch_absolute(pyembroidery.STITCH, int(cx), int(cy))
 
-        # === 2. SARGI (TOP SATIN) ===
-        # Maksimum dikiş uzunluğu (iğne kırılmasın): 7mm = 70 birim
+        # === 2. ANA SARGI (TOP SATIN) - Çok sıkı ===
         MAX_DIKIŞ = 70
-        
-        # Eğer genişlik çok fazlaysa, iğne kırılmasın diye adım sayısını artır
         if genislik > MAX_DIKIŞ:
             ara_adim = int(math.ceil(genislik / MAX_DIKIŞ))
         else:
             ara_adim = 1
 
-        YOGUNLUK = 3
+        YOGUNLUK = 2
         steps_sargi = int(dist // YOGUNLUK)
         if steps_sargi < 2:
             steps_sargi = 2
@@ -74,32 +88,36 @@ class ProfesyonelNakis:
                 else:
                     self.pattern.add_stitch_absolute(pyembroidery.STITCH, int(cx - nx), int(cy - ny))
 
-    def _kavis_ciz(self, cx, cy, r, baslangic_aci, bitis_aci, scale, adim=12):
-        """Yay (arc) noktaları üretir. Açılar derece cinsindendir."""
-        noktalar = []
-        for i in range(adim + 1):
-            t = i / adim
-            aci = math.radians(baslangic_aci + (bitis_aci - baslangic_aci) * t)
-            x = cx + r * math.cos(aci)
-            y = cy + r * math.sin(aci)
-            noktalar.append((x, y))
-        return noktalar
-
-    def _kavis_cizgiler(self, cx, cy, r, baslangic_aci, bitis_aci, scale, adim=12):
-        """Kavisten çizgi segmentleri döndürür."""
-        noktalar = self._kavis_ciz(cx, cy, r, baslangic_aci, bitis_aci, scale, adim)
-        cizgiler = []
-        for i in range(len(noktalar) - 1):
-            cizgiler.append((noktalar[i][0], noktalar[i][1], noktalar[i+1][0], noktalar[i+1][1]))
-        return cizgiler
+        # === 3. İKİNCİ KAT SARGI (Boşluk kapatma) ===
+        # Hafif kaydırılmış ikinci geçiş
+        kayma = YOGUNLUK / 2
+        for i in range(steps_sargi + 1):
+            ratio = (i + 0.5) / steps_sargi
+            if ratio > 1:
+                ratio = 1
+            cx = x1 + (dx * ratio)
+            cy = y1 + (dy * ratio)
+            
+            if ara_adim > 1:
+                if i % 2 == 0:
+                    for j in range(ara_adim + 1):
+                        t = j / ara_adim
+                        px = cx - nx + (2 * nx * t)
+                        py = cy - ny + (2 * ny * t)
+                        self.pattern.add_stitch_absolute(pyembroidery.STITCH, int(px), int(py))
+                else:
+                    for j in range(ara_adim + 1):
+                        t = j / ara_adim
+                        px = cx + nx - (2 * nx * t)
+                        py = cy + ny - (2 * ny * t)
+                        self.pattern.add_stitch_absolute(pyembroidery.STITCH, int(px), int(py))
+            else:
+                if i % 2 == 0:
+                    self.pattern.add_stitch_absolute(pyembroidery.STITCH, int(cx + nx), int(cy + ny))
+                else:
+                    self.pattern.add_stitch_absolute(pyembroidery.STITCH, int(cx - nx), int(cy - ny))
 
     def isim_yaz(self, metin, baslangic_x, baslangic_y, boyut_cm, birim="cm"):
-        """
-        metin: Yazılacak metin
-        baslangic_x, baslangic_y: Başlangıç koordinatları (birim cinsinden)
-        boyut_cm: Harf boyutu
-        birim: "cm" veya "mm" (varsayılan cm)
-        """
         if birim == "cm":
             harf_boyu_mm = boyut_cm * 10
         elif birim == "mm":
@@ -107,9 +125,8 @@ class ProfesyonelNakis:
         else:
             harf_boyu_mm = boyut_cm * 10
 
-        # Başlangıç koordinatlarını da birime göre çevir
         if birim == "cm":
-            bx = baslangic_x * 100  # cm -> nakış birimi (1cm = 100 birim)
+            bx = baslangic_x * 100
             by = baslangic_y * 100
         elif birim == "mm":
             bx = baslangic_x * 10
@@ -122,16 +139,11 @@ class ProfesyonelNakis:
         scale = harf_boyu_mm * 10
         bosluk = scale * 0.25
 
-        # Büyük harf genişlik çarpanı
         bh_gen = 0.7
-        # Küçük harf yükseklik (scale'in %60'ı)
         kh_yuk = 0.6
-        # Küçük harf genişlik çarpanı
         kh_gen = 0.55
-        # Sayı genişlik çarpanı
         sy_gen = 0.65
 
-        # --- BÜYÜK HARFLER ---
         buyuk_harfler = {
             'A': [(0,0, 0.5,1), (0.5,1, 1,0), (0.2,0.4, 0.8,0.4)],
             'B': [(0,0, 0,1), (0,1, 0.7,1), (0.7,1, 0.7,0.55), (0.7,0.55, 0,0.55), (0,0.55, 0.75,0.55), (0.75,0.55, 0.75,0), (0.75,0, 0,0)],
@@ -161,7 +173,6 @@ class ProfesyonelNakis:
             'Z': [(0,1, 1,1), (1,1, 0,0), (0,0, 1,0)],
         }
 
-        # --- KÜÇÜK HARFLER ---
         kucuk_harfler = {
             'a': [(0.85,0.6, 0.85,0), (0.85,0.5, 0.65,0.6), (0.65,0.6, 0.2,0.6), (0.2,0.6, 0,0.45), (0,0.45, 0,0.2), (0,0.2, 0.2,0), (0.2,0, 0.85,0)],
             'b': [(0,0, 0,1), (0,0.5, 0.2,0.6), (0.2,0.6, 0.7,0.6), (0.7,0.6, 0.85,0.45), (0.85,0.45, 0.85,0.15), (0.85,0.15, 0.7,0), (0.7,0, 0,0)],
@@ -191,7 +202,6 @@ class ProfesyonelNakis:
             'z': [(0,0.6, 0.85,0.6), (0.85,0.6, 0,0), (0,0, 0.85,0)],
         }
 
-        # --- SAYILAR ---
         sayilar = {
             '0': [(0.15,0, 0,0.15), (0,0.15, 0,0.85), (0,0.85, 0.15,1), (0.15,1, 0.75,1), (0.75,1, 0.9,0.85), (0.9,0.85, 0.9,0.15), (0.9,0.15, 0.75,0), (0.75,0, 0.15,0)],
             '1': [(0.2,0.8, 0.5,1), (0.5,1, 0.5,0), (0.2,0, 0.8,0)],
@@ -205,7 +215,6 @@ class ProfesyonelNakis:
             '9': [(0.1,0.1, 0.3,0), (0.3,0, 0.7,0), (0.7,0, 0.9,0.15), (0.9,0.15, 0.9,0.85), (0.9,0.85, 0.75,1), (0.75,1, 0.15,1), (0.15,1, 0,0.85), (0,0.85, 0,0.6), (0,0.6, 0.15,0.45), (0.15,0.45, 0.75,0.45), (0.75,0.45, 0.9,0.6)],
         }
 
-        # --- TÜRKÇE KARAKTERLER (BÜYÜK) ---
         turkce_buyuk = {
             'Ç': buyuk_harfler['C'] + [(0.35,-0.15, 0.5,-0.3), (0.5,-0.3, 0.65,-0.15)],
             'Ğ': buyuk_harfler['G'] + [(0.3,1.1, 0.5,1.2), (0.5,1.2, 0.7,1.1)],
@@ -215,7 +224,6 @@ class ProfesyonelNakis:
             'Ü': buyuk_harfler['U'] + [(0.3,1.1, 0.3,1.18), (0.7,1.1, 0.7,1.18)],
         }
 
-        # --- TÜRKÇE KARAKTERLER (KÜÇÜK) ---
         turkce_kucuk = {
             'ç': kucuk_harfler['c'] + [(0.3,-0.12, 0.45,-0.25), (0.45,-0.25, 0.6,-0.12)],
             'ğ': kucuk_harfler['g'] + [(0.25,0.7, 0.45,0.8), (0.45,0.8, 0.65,0.7)],
@@ -225,7 +233,6 @@ class ProfesyonelNakis:
             'ü': kucuk_harfler['u'] + [(0.25,0.72, 0.25,0.78), (0.6,0.72, 0.6,0.78)],
         }
 
-        # --- ÖZEL KARAKTERLER ---
         ozel = {
             ' ': [],
             '-': [(0.1,0.5, 0.9,0.5)],
@@ -235,11 +242,10 @@ class ProfesyonelNakis:
             '?': [(0,0.85, 0.15,1), (0.15,1, 0.75,1), (0.75,1, 0.9,0.85), (0.9,0.85, 0.9,0.6), (0.9,0.6, 0.5,0.4), (0.5,0.4, 0.5,0.25), (0.5,0, 0.5,0.08)],
             '/': [(0,0, 1,1)],
             ':': [(0.45,0.15, 0.45,0.22), (0.45,0.45, 0.45,0.52)],
-            '@': [(0.7,0.3, 0.55,0.3), (0.55,0.3, 0.45,0.4), (0.45,0.4, 0.45,0.55), (0.45,0.55, 0.55,0.65), (0.55,0.65, 0.7,0.65), (0.7,0.65, 0.8,0.55), (0.8,0.55, 0.8,0.3), (0.8,0.15, 0.65,0), (0.65,0, 0.25,0), (0.25,0, 0.05,0.2), (0.05,0.2, 0.05,0.8), (0.05,0.8, 0.25,1), (0.25,1, 0.75,1), (0.75,1, 0.95,0.8)],
             '#': [(0.3,0, 0.3,1), (0.7,0, 0.7,1), (0.05,0.35, 0.95,0.35), (0.05,0.65, 0.95,0.65)],
         }
 
-        sargi_kalinligi = harf_boyu_mm * 0.12
+        sargi_kalinligi = harf_boyu_mm * 0.13
         if sargi_kalinligi < 2.0:
             sargi_kalinligi = 2.0
         if sargi_kalinligi > 5.0:
@@ -250,11 +256,9 @@ class ProfesyonelNakis:
                 mevcut_x += scale * 0.5
                 continue
 
-            # Hangi sette olduğunu bul
             cizgiler = None
             gen_carpan = bh_gen
             yuk_carpan = 1.0
-            y_offset = 0
 
             if harf in buyuk_harfler:
                 cizgiler = buyuk_harfler[harf]
@@ -281,7 +285,6 @@ class ProfesyonelNakis:
                 gen_carpan = 0.5
                 yuk_carpan = 1.0
             else:
-                # Bilinmeyen karakter, atla
                 mevcut_x += scale * 0.3
                 continue
 
@@ -289,13 +292,15 @@ class ProfesyonelNakis:
                 mevcut_x += scale * 0.3
                 continue
 
-            for (lx1, ly1, lx2, ly2) in cizgiler:
+            for idx, (lx1, ly1, lx2, ly2) in enumerate(cizgiler):
                 gx1 = mevcut_x + (lx1 * scale * gen_carpan)
                 gy1 = by + (ly1 * scale * yuk_carpan)
                 gx2 = mevcut_x + (lx2 * scale * gen_carpan)
                 gy2 = by + (ly2 * scale * yuk_carpan)
-                self.tam_sargi_yap(gx1, gy1, gx2, gy2, sargi_kalinligi)
+                self.tam_sargi_yap(gx1, gy1, gx2, gy2, sargi_kalinligi, ilk_segment=(idx == 0))
 
+            # Harf bitti, TRIM ekle (harfler arası temiz geçiş)
+            self.pattern.add_stitch_absolute(pyembroidery.TRIM, 0, 0)
             mevcut_x += (scale * gen_carpan) + bosluk
 
     def onizleme_olustur(self, dosya_adi):
@@ -353,13 +358,12 @@ if __name__ == "__main__":
     # AYARLAR (İSTEDİĞİNİZ GİBİ DEĞİŞTİRİN)
     # ========================================
     
-    MUSTERI_ISMI = "Mehmet Öz 2025"   # Büyük/küçük harf, Türkçe karakter, sayı hepsi desteklenir
+    MUSTERI_ISMI = "Mehmet Öz 2025"   # Büyük/küçük harf, Türkçe, sayı hepsi desteklenir
     BOYUT = 2.5                        # Harf boyutu
     BIRIM = "cm"                       # "cm" veya "mm"
     
     # ========================================
     
-    # Otomatik ortalama hesabı
     harf_sayisi = len(MUSTERI_ISMI.replace(" ", ""))
     bosluk_sayisi = MUSTERI_ISMI.count(" ")
     
