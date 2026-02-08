@@ -264,7 +264,7 @@ if __name__ == "__main__":
     # ---------------------------------------------------------
     # BURAYI DOLDURMAN YETERLİ
     # ---------------------------------------------------------
-    YAZILACAK_METIN = "Diyarbakır 21"  
+    YAZILACAK_METIN = "Denizxğ"  
     
     # Kutu Boyutları (CM Cinsinden)
     # Yazıyı bu kutunun içine sığdırır.
