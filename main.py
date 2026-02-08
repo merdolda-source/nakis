@@ -465,7 +465,7 @@ if __name__ == '__main__':
     # ─── AYARLAR ──────────────────────────────────────────────────
     ISIM  = "SELMAN"
     BOYUT = 2.5              # harf yüksekliği
-    BIRIM = "mm"             # "cm" veya "mm"
+    BIRIM = "cm"             # "cm" veya "mm"
     # ──────────────────────────────────────────────────────────────
 
     harf_say  = len(ISIM.replace(' ', ''))
