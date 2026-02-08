@@ -366,8 +366,8 @@ if __name__ == "__main__":
 
     LOGO_DOSYA   = "logo.png"
     BIRIM        = "cm"
-    GENISLIK_CM  = 15
-    YUKSEKLIK_CM = 5
+    GENISLIK_CM  = 10
+    YUKSEKLIK_CM = 7
     BAS_X        = 0
     BAS_Y        = 0
 
@@ -375,9 +375,9 @@ if __name__ == "__main__":
     MIN_AREA_PX      = 50
     OUTLINE          = True
     FILL             = True
-    HATCH_STEP_MM    = 0.7
-    STITCH_STEP_MM   = 0.6
-    SIMPLIFY_EPS     = 0.4
+    HATCH_STEP_MM    = 0.3
+    STITCH_STEP_MM   = 0.4
+    SIMPLIFY_EPS     = 0.2
     MIN_CONTOUR_LEN  = 2
 
     m.logo_isle(
